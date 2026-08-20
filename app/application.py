@@ -20,7 +20,7 @@ from app.config.settings import SettingsManager
 from app.core.container import ServiceContainer
 from app.core.events import EventBus
 from app.core.jobs import JobQueue
-from app.core.logging_setup import setup_logging
+from app.core.logging_setup import attach_project_log, detach_handler, setup_logging
 from app.core.undo import UndoStack
 from app.database.session import AppDatabase
 from app.export.exporter import ExportService
@@ -83,6 +83,7 @@ class Application:
 
         self._register()
         self.current: ProjectHandle | None = None
+        self._project_log: logging.Handler | None = None
         log.info("Application ready (data directory: %s)", self.paths.data)
 
     def _register(self) -> None:
@@ -119,12 +120,29 @@ class Application:
 
     def _bind_project(self, handle: ProjectHandle) -> None:
         """Point the per-project services at *handle*."""
+        if self._project_log is not None:
+            detach_handler(self._project_log)
+        self._project_log = attach_project_log(handle.logs_dir)
         self.current = handle
         self.undo.clear()
         self.assets.photoshop = self.adobe.photoshop
         self.exporter.indesign = self.adobe.indesign if self.adobe.indesign_app.installed else None
         self.projects.mark_interrupted_runs(handle)
         self.app_db.set_setting("last_project", handle.slug)
+
+    def resumable_stage(self):
+        """The stage an interrupted run could resume from, or ``None``."""
+        from app.models.schemas import PipelineStage
+
+        if self.current is None:
+            return None
+        state = self.projects.resumable(self.current)
+        if state is None:
+            return None
+        try:
+            return PipelineStage(state["stage"])
+        except ValueError:
+            return None
 
     def last_project(self) -> str:
         """Slug of the project opened last (for "resume on start")."""
@@ -158,6 +176,9 @@ class Application:
     def shutdown(self) -> None:
         """Stop the workers and release every resource."""
         log.info("Shutting down")
+        if self._project_log is not None:
+            detach_handler(self._project_log)
+            self._project_log = None
         self.jobs.shutdown()
         try:
             self.ai.close()

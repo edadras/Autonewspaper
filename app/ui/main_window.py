@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 
 from app.application import Application
 from app.core.jobs import CancelToken
-from app.models.schemas import ApprovalRequest, PipelineResult
+from app.models.schemas import ApprovalRequest, PipelineResult, PipelineStage
 from app.services.project_manager import ProjectHandle
 from app.ui.bridge import EventBridge
 from app.ui.pages.assets import AssetsPage
@@ -66,6 +66,7 @@ class PipelineWorker(QThread):
         token: CancelToken,
         approval: Any,
         parent: QWidget | None = None,
+        resume_from: PipelineStage | None = None,
     ) -> None:
         super().__init__(parent)
         self.app = application
@@ -73,11 +74,16 @@ class PipelineWorker(QThread):
         self.mode = mode
         self.token = token
         self.approval = approval
+        self.resume_from = resume_from
 
     def run(self) -> None:  # noqa: D102 - QThread API
         try:
             result = self.app.pipeline.run(
-                self.handle, mode=self.mode, token=self.token, approval=self.approval
+                self.handle,
+                mode=self.mode,
+                token=self.token,
+                approval=self.approval,
+                resume_from=self.resume_from,
             )
             self.finished_with.emit(result)
         except Exception as exc:  # noqa: BLE001 - never let a worker crash the app
@@ -321,8 +327,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Created {info.name}", 6000)
 
     # ------------------------------------------------------------- running
-    def start_generation(self, mode: str | None = None) -> None:
-        """Start the pipeline on a worker thread."""
+    def start_generation(self, mode: str | None = None, resume_from: PipelineStage | None = None) -> None:
+        """Start (or resume) the pipeline on a worker thread."""
         if self.app.current is None:
             show_error(self, "Generate", "Open or create a project first.")
             return
@@ -332,7 +338,13 @@ class MainWindow(QMainWindow):
         mode = mode or self.app.settings.settings.pipeline.mode
         self.token = CancelToken()
         self.worker = PipelineWorker(
-            self.app, self.app.current, mode, self.token, self._approval_callback, self
+            self.app,
+            self.app.current,
+            mode,
+            self.token,
+            self._approval_callback,
+            self,
+            resume_from=resume_from,
         )
         self.worker.finished_with.connect(self._on_run_finished)
         self.worker.failed_with.connect(self._on_run_failed)
@@ -341,7 +353,11 @@ class MainWindow(QMainWindow):
         self._dashboard().set_running(True)
         self.bridge.pipeline_stage.connect(self._on_stage)
         self.worker.start()
-        self.statusBar().showMessage(f"Generating in '{mode}' mode…")
+        self.statusBar().showMessage(
+            f"Resuming from '{resume_from.value}' in '{mode}' mode…"
+            if resume_from
+            else f"Generating in '{mode}' mode…"
+        )
 
     def cancel_generation(self) -> None:
         """Ask the running pipeline to stop."""

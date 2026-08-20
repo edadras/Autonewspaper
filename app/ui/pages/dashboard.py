@@ -61,9 +61,13 @@ class DashboardPage(Page):
         self.generate_button = QPushButton("🚀  Generate Newspaper")
         self.generate_button.setObjectName("Primary")
         self.generate_button.clicked.connect(self._generate)
+        self.resume_button = QPushButton("Resume interrupted run")
+        self.resume_button.setVisible(False)
+        self.resume_button.clicked.connect(self._resume)
         self.cancel_button = QPushButton("Stop")
         self.cancel_button.setEnabled(False)
         self.cancel_button.clicked.connect(self._cancel)
+        controls.add(self.resume_button)
         controls.add(self.generate_button)
         controls.add(self.cancel_button)
         run_card.add(controls)
@@ -133,7 +137,11 @@ class DashboardPage(Page):
         else:
             self.status_label.setText("No run yet for this project.")
         resumable = self.app.projects.resumable(handle)
+        self.resume_button.setVisible(bool(resumable))
         if resumable:
+            self.resume_button.setToolTip(
+                f"Continue the interrupted run from the '{resumable['stage']}' stage"
+            )
             self.status_label.setText(
                 self.status_label.text()
                 + f"\nAn interrupted run is available to resume from '{resumable['stage']}'."
@@ -171,6 +179,19 @@ class DashboardPage(Page):
         starter = getattr(window, "start_generation", None)
         if callable(starter):
             starter(self.mode_box.currentText())
+
+    def _resume(self) -> None:
+        """Continue an interrupted run from the stage it reached."""
+        if self.handle is None:
+            return
+        stage = self.app.resumable_stage()
+        if stage is None:
+            self.refresh()
+            return
+        window = self.window()
+        starter = getattr(window, "start_generation", None)
+        if callable(starter):
+            starter(self.mode_box.currentText(), resume_from=stage)
 
     def _cancel(self) -> None:
         window = self.window()

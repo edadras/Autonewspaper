@@ -186,3 +186,31 @@ def test_the_event_bridge_forwards_core_events(qt_app, application):
     qt_app.processEvents()
     assert received and received[0]["page"] == 3
     bridge.close()
+
+
+def test_resume_button_appears_for_an_interrupted_run(window, qt_app, application, project):
+    from app.models import entities as E
+
+    dashboard = window.pages[0]
+    dashboard.refresh()
+    # isVisible() is False for every widget while the window itself is hidden,
+    # so the explicit hidden flag is what the assertion has to look at.
+    assert dashboard.resume_button.isHidden()
+
+    with project.uow() as uow:
+        uow.runs.add(
+            E.PipelineRun(project_id=project.project_id, status="running", stage="layout")
+        )
+    dashboard.refresh()
+    qt_app.processEvents()
+    assert not dashboard.resume_button.isHidden()
+    assert application.resumable_stage() is not None
+
+
+def test_a_project_log_file_is_written(application, project):
+    logging_target = project.logs_dir / "project.log"
+    import logging
+
+    logging.getLogger("app.test").warning("a line for the project log")
+    assert logging_target.exists()
+    assert "project log" in logging_target.read_text(encoding="utf-8", errors="replace")
