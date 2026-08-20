@@ -458,6 +458,8 @@ class MainWindow(QMainWindow):
                 return
             self.cancel_generation()
             self.worker.wait(8000)
+        for page in self.pages:
+            page.tasks.wait_all(5000)
         try:
             self.bridge.close()
         except Exception:  # noqa: BLE001

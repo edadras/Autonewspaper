@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -21,6 +22,63 @@ from app.models.schemas import LayoutPlan
 from app.templates.schema import PDFPresetSpec, TemplateSpec
 from app.utils.files import make_archive
 from app.vision.renderer import PreviewRenderer
+
+
+def pdf_from_images(
+    images: list[Path], target: Path, source_dpi: int, target_dpi: int
+) -> Path:
+    """Write a multi-page PDF from already-rendered page images."""
+    from PIL import Image
+
+    target = Path(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    ratio = min(1.0, target_dpi / max(1, source_dpi))
+    pages = []
+    try:
+        for path in images:
+            image = Image.open(path).convert("RGB")
+            if ratio < 0.999:
+                image = image.resize(
+                    (max(1, int(image.width * ratio)), max(1, int(image.height * ratio))),
+                    Image.Resampling.LANCZOS,
+                )
+            pages.append(image)
+        if not pages:
+            raise ValueError("no pages to write")
+        pages[0].save(
+            target, "PDF", resolution=float(target_dpi), save_all=True, append_images=pages[1:]
+        )
+    finally:
+        for image in pages:
+            image.close()
+    return target
+
+
+def scale_image(source: Path, target: Path, source_dpi: int, target_dpi: int) -> Path:
+    """Downsample a rendered page to another resolution."""
+    from PIL import Image
+
+    target = Path(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    ratio = min(1.0, target_dpi / max(1, source_dpi))
+    with Image.open(source) as image:
+        if ratio < 0.999:
+            image = image.resize(
+                (max(1, int(image.width * ratio)), max(1, int(image.height * ratio))),
+                Image.Resampling.LANCZOS,
+            )
+        image.convert("RGB").save(target, dpi=(target_dpi, target_dpi))
+    return target
+
+
+def write_jpeg(source: Path, target: Path, quality: int = 88) -> Path:
+    """Write a JPEG companion for a rendered page."""
+    from PIL import Image
+
+    target = Path(target)
+    with Image.open(source) as image:
+        image.convert("RGB").save(target, "JPEG", quality=quality, optimize=True)
+    return target
 
 if TYPE_CHECKING:  # pragma: no cover - avoids an import cycle with app.services
     from app.services.project_manager import ProjectHandle
@@ -71,6 +129,7 @@ class ExportResult:
     indd: str | None = None
     idml: str | None = None
     previews: list[str] = field(default_factory=list)
+    assets: list[str] = field(default_factory=list)
     archive: str | None = None
     engine: str = "indesign"
     """``"indesign"`` or ``"builtin"`` - which renderer produced the PDFs."""
@@ -83,6 +142,7 @@ class ExportResult:
             "indd": self.indd,
             "idml": self.idml,
             "previews": self.previews,
+            "assets": self.assets,
             "archive": self.archive,
             "engine": self.engine,
             "warnings": self.warnings,
@@ -104,9 +164,15 @@ class ExportService:
         self,
         indesign: InDesignController | None = None,
         bus: EventBus | None = None,
+        *,
+        builtin_pdf_dpi: int = 200,
+        render_workers: int = 4,
     ) -> None:
         self.indesign = indesign
         self.bus = bus
+        self.builtin_pdf_dpi = max(72, builtin_pdf_dpi)
+        self.render_workers = max(1, render_workers)
+        self._masters: tuple[int, list[Path]] | None = None
 
     # ---------------------------------------------------------------- pdfs
     def export(
@@ -163,24 +229,19 @@ class ExportService:
             # Either InDesign is absent or every export attempt failed.
             result.engine = "builtin"
             if use_indesign:
-                result.warnings.append("InDesign produced no PDF; the built-in renderer was used instead.")
-            renderer = PreviewRenderer(template, dpi=max(150, preview_dpi))
-            for preset_id in wanted:
-                preset = available.get(preset_id)
-                dpi = min(300, preset.downsample_dpi if preset else 200)
-                target = output / PRESET_FILENAMES.get(preset_id, f"newspaper_{preset_id}.pdf")
-                try:
-                    renderer.render_pdf(plan, target, dpi=dpi)
-                    result.pdfs[preset_id] = str(target)
-                except Exception as exc:  # noqa: BLE001
-                    raise ExportError(f"Could not produce the '{preset_id}' PDF: {exc}", cause=exc) from exc
+                result.warnings.append(
+                    "InDesign produced no PDF; the built-in renderer was used instead."
+                )
+            self._builtin_pdfs(handle, plan, template, wanted, available, preview_dpi, result)
             result.warnings.append(
                 "The PDF was rendered by the built-in engine, not InDesign; "
                 "colour management and preflight settings are not applied."
             )
 
         if export_previews:
-            result.previews = self._previews(handle, plan, template, preview_dpi, use_indesign, result)
+            result.previews = self._previews(
+                handle, plan, template, preview_dpi, use_indesign, result
+            )
 
         if result.pdfs:
             primary = Path(result.primary_pdf or "")
@@ -188,6 +249,8 @@ class ExportService:
             if primary.exists() and primary != final:
                 shutil.copy2(primary, final)
                 result.pdfs["final"] = str(final)
+
+        result.assets = self._collect_assets(handle, plan)
 
         if archive:
             try:
@@ -210,6 +273,107 @@ class ExportService:
         )
         return result
 
+    def _builtin_pdfs(
+        self,
+        handle: ProjectHandle,
+        plan: LayoutPlan,
+        template: TemplateSpec,
+        wanted: list[str],
+        available: dict[str, PDFPresetSpec],
+        preview_dpi: int,
+        result: ExportResult,
+    ) -> None:
+        """Produce every requested PDF from a single set of page renders.
+
+        Rendering each page once at the highest resolution any output needs,
+        then downsampling, turns an N-preset export from N full renders into
+        one - which on a twenty-page broadsheet is the difference between a
+        minute and a few seconds.
+        """
+        target_dpis = {
+            preset_id: min(300, available[preset_id].downsample_dpi)
+            if preset_id in available
+            else 200
+            for preset_id in wanted
+        }
+        # The built-in PDF is a proof; its resolution is capped so a large
+        # edition does not spend minutes rasterising at press resolution.
+        master_dpi = min(
+            max([*target_dpis.values(), preview_dpi, 150]), self.builtin_pdf_dpi
+        )
+        renderer = PreviewRenderer(template, dpi=master_dpi)
+        masters = self._master_renders(handle, plan, renderer, master_dpi)
+        if not masters:
+            raise ExportError("The built-in renderer produced no pages to export")
+
+        output = handle.output_dir
+        for preset_id in wanted:
+            target = output / PRESET_FILENAMES.get(preset_id, f"newspaper_{preset_id}.pdf")
+            try:
+                pdf_from_images(masters, target, master_dpi, target_dpis[preset_id])
+                result.pdfs[preset_id] = str(target)
+            except Exception as exc:  # noqa: BLE001
+                raise ExportError(
+                    f"Could not produce the '{preset_id}' PDF: {exc}", cause=exc
+                ) from exc
+
+    def _master_renders(
+        self,
+        handle: ProjectHandle,
+        plan: LayoutPlan,
+        renderer: PreviewRenderer,
+        dpi: int,
+    ) -> list[Path]:
+        """Render every page once, caching the result for this export."""
+        directory = handle.directory / "previews" / f"master_{dpi}"
+        directory.mkdir(parents=True, exist_ok=True)
+        targets = [
+            (page, directory / f"page_{page.index:03d}.png") for page in plan.pages
+        ]
+
+        def render(item: tuple[Any, Path]) -> Path:
+            page, target = item
+            renderer.render_page(page, target)
+            return target
+
+        if len(targets) > 1 and self.render_workers > 1:
+            # Page rasterisation is independent work and FreeType releases the
+            # interpreter lock, so it genuinely parallelises.
+            with ThreadPoolExecutor(
+                max_workers=min(self.render_workers, len(targets)),
+                thread_name_prefix="ains-render",
+            ) as pool:
+                paths = list(pool.map(render, targets))
+        else:
+            paths = [render(item) for item in targets]
+
+        self._masters = (dpi, paths)
+        return paths
+
+    def _collect_assets(self, handle: ProjectHandle, plan: LayoutPlan) -> list[str]:
+        """Copy the pictures the pages actually use into ``output/assets``."""
+        directory = handle.output_dir / "assets"
+        directory.mkdir(parents=True, exist_ok=True)
+        copied: list[str] = []
+        seen: set[str] = set()
+        for page in plan.pages:
+            for element in page.elements:
+                path = element.image_path
+                if not path or path in seen:
+                    continue
+                seen.add(path)
+                source = Path(path)
+                if not source.exists():
+                    continue
+                destination = directory / source.name
+                try:
+                    if not destination.exists() or destination.stat().st_size != source.stat().st_size:
+                        shutil.copy2(source, destination)
+                    copied.append(str(destination))
+                except OSError as exc:  # pragma: no cover - disk problems
+                    log.warning("Could not copy %s into the output folder: %s", source.name, exc)
+        return copied
+
     def _previews(
         self,
         handle: ProjectHandle,
@@ -219,23 +383,35 @@ class ExportService:
         use_indesign: bool,
         result: ExportResult,
     ) -> list[str]:
-        """Export a page image per page into ``output/previews``."""
+        """Export a page image per page into ``output/previews``.
+
+        Both a PNG and a JPEG are written for every page (specification §41).
+        When the built-in renderer already produced master images for the PDFs
+        they are downsampled rather than rendered again.
+        """
         directory = handle.output_dir / "previews"
+        directory.mkdir(parents=True, exist_ok=True)
         previews: list[str] = []
+        masters = self._masters
         renderer = PreviewRenderer(template, dpi=dpi)
-        for page in plan.pages:
-            target = directory / f"page_{page.index:03d}.jpg"
+
+        for index, page in enumerate(plan.pages):
+            png = directory / f"page_{page.index:03d}.png"
+            jpeg = directory / f"page_{page.index:03d}.jpg"
             if use_indesign and self.indesign is not None:
                 try:
-                    self.indesign.render_preview(page.index, target, dpi=dpi, fmt="jpeg")
-                    previews.append(str(target))
+                    self.indesign.render_preview(page.index, jpeg, dpi=dpi, fmt="jpeg")
+                    previews.append(str(jpeg))
                     continue
                 except Exception as exc:  # noqa: BLE001
                     result.warnings.append(f"InDesign preview for page {page.index} failed: {exc}")
             try:
-                png = target.with_suffix(".png")
-                renderer.render_page(page, png)
-                previews.append(str(png))
+                if masters and index < len(masters[1]):
+                    scale_image(masters[1][index], png, masters[0], dpi)
+                else:
+                    renderer.render_page(page, png)
+                write_jpeg(png, jpeg)
+                previews.extend([str(png), str(jpeg)])
             except Exception as exc:  # noqa: BLE001
                 result.warnings.append(f"Preview for page {page.index} failed: {exc}")
         return previews

@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 from app.models.schemas import LayoutPlan
 from app.ui.pages.base import Page
 from app.ui.pages.preview import _open_path
-from app.ui.widgets.common import Card, Toolbar, run_guarded, show_error
+from app.ui.widgets.common import Card, Toolbar, show_error
 
 log = logging.getLogger(__name__)
 
@@ -120,30 +120,44 @@ class ExportPage(Page):
             show_error(self, "Export", "Select at least one PDF preset.")
             return
 
-        def action() -> None:
+        def work():
             plan = LayoutPlan.load(handle.layout_plan_path)
             template = self.app.templates.get_or_default(plan.template_id)
             self.app.exporter.indesign = (
                 self.app.adobe.indesign if self.app.adobe.indesign_app.installed else None
             )
-            result = self.app.exporter.export(
+            return self.app.exporter.export(
                 handle,
                 plan,
                 template,
                 presets=presets,
-                export_indd=self.indd_check.isChecked(),
-                export_idml=self.idml_check.isChecked(),
-                export_previews=self.previews_check.isChecked(),
-                preview_dpi=self.dpi_spin.value(),
-                archive=self.archive_check.isChecked(),
+                export_indd=indd,
+                export_idml=idml,
+                export_previews=previews,
+                preview_dpi=dpi,
+                archive=archive,
             )
+
+        def done(result) -> None:
             self.refresh()
             message = f"Exported with the {result.engine} engine: {', '.join(result.pdfs)}"
             if result.warnings:
                 message += "\n" + "\n".join(f"• {w}" for w in result.warnings[:4])
             self.status.setText(message)
 
-        run_guarded(self, "Export", action)
+        indd = self.indd_check.isChecked()
+        idml = self.idml_check.isChecked()
+        previews = self.previews_check.isChecked()
+        dpi = self.dpi_spin.value()
+        archive = self.archive_check.isChecked()
+        self.run_background(
+            "export",
+            "Exporting",
+            work,
+            on_success=done,
+            busy_widgets=[self.export_button, self.package_button],
+            status=self.status,
+        )
 
     def _package(self) -> None:
         handle = self.handle
@@ -153,13 +167,22 @@ class ExportPage(Page):
             show_error(self, "Package", "Packaging collects links and fonts and requires InDesign.")
             return
 
-        def action() -> None:
+        def work():
             self.app.exporter.indesign = self.app.adobe.indesign
-            folder = self.app.exporter.package(handle)
+            return self.app.exporter.package(handle)
+
+        def done(folder) -> None:
             self.status.setText(f"Packaged into {folder}")
             self.refresh()
 
-        run_guarded(self, "Package", action)
+        self.run_background(
+            "package",
+            "Packaging for print",
+            work,
+            on_success=done,
+            busy_widgets=[self.export_button, self.package_button],
+            status=self.status,
+        )
 
     def _open_folder(self) -> None:
         if self.handle is not None:

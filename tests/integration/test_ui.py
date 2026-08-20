@@ -110,10 +110,13 @@ def test_the_templates_page_shows_the_catalogue(window, qt_app):
 
 
 def test_diagnostics_run_from_the_page(window, qt_app):
+    """The checks run on a worker thread, so the window never blocks."""
     window.show_page("Diagnostics")
     qt_app.processEvents()
     page = next(p for p in window.pages if p.title == "Diagnostics")
-    page._run(deep=False)
+    task = page._run(deep=False)
+    assert task is not None
+    task.wait(60_000)
     qt_app.processEvents()
     assert page.table.rowCount() > 5
 
@@ -173,6 +176,52 @@ def test_manual_frame_edit_is_undoable(window, qt_app, application, project):
     assert application.undo.can_undo
     application.undo.undo()
     assert element.rect.y == pytest.approx(before)
+
+
+def test_long_operations_do_not_block_the_window(window, qt_app, project, tmp_path):
+    """An import must run on a worker thread, not in the Qt slot."""
+    import time
+
+    page = next(p for p in window.pages if p.title == "Content")
+    window.show_page("Content")
+    qt_app.processEvents()
+
+    sources = []
+    for index in range(6):
+        path = tmp_path / f"extra_{index}.txt"
+        path.write_text(f"title: خبر {index}\n\n" + ("متن خبر. " * 400), encoding="utf-8")
+        sources.append(path)
+
+    started = time.monotonic()
+    page._import_paths(sources)
+    elapsed = time.monotonic() - started
+    assert elapsed < 0.5, f"the Qt slot blocked for {elapsed:.2f}s"
+
+    assert page.tasks.busy("import-content") or page.table.rowCount() > 5
+    page.tasks.wait_all(60_000)
+    qt_app.processEvents()
+    page.refresh()
+    assert page.table.rowCount() == 11
+
+
+def test_a_failing_background_task_is_reported_not_raised(window, qt_app, monkeypatch):
+    """A worker failure must reach the page, never the Qt event loop."""
+    from app.ui.widgets import common
+
+    page = next(p for p in window.pages if p.title == "Content")
+    reported: list[str] = []
+    monkeypatch.setattr(
+        common, "show_error", lambda parent, title, message, detail="": reported.append(message)
+    )
+
+    task = page.run_background(
+        "boom", "Deliberate failure", lambda: 1 / 0, status=page.status
+    )
+    assert task is not None
+    task.wait(10_000)
+    qt_app.processEvents()
+    assert reported and "division by zero" in reported[0]
+    assert "failed" in page.status.text().lower()
 
 
 def test_the_event_bridge_forwards_core_events(qt_app, application):

@@ -194,15 +194,23 @@ class ContentPage(Page):
             else:
                 expanded.append(path)
 
-        def action() -> None:
-            result = self.app.content.import_files(self.handle, expanded)
+        handle = self.handle
+
+        def done(result) -> None:
             self.refresh()
             message = f"Imported {result.count} story/stories from {len(result.files)} file(s)."
             if result.skipped:
                 message += " Skipped: " + ", ".join(f"{f} ({r})" for f, r in result.skipped[:3])
             self.status.setText(message)
 
-        run_guarded(self, "Import content", action)
+        self.run_background(
+            "import-content",
+            f"Importing {len(expanded)} file(s)",
+            lambda: self.app.content.import_files(handle, expanded),
+            on_success=done,
+            busy_widgets=[self.import_button, self.paste_button, self.drop],
+            status=self.status,
+        )
 
     def _paste(self) -> None:
         if self.handle is None:
@@ -214,12 +222,20 @@ class ContentPage(Page):
             show_error(self, "Paste", "The clipboard has no text.")
             return
 
-        def action() -> None:
-            result = self.app.content.import_text(self.handle, text)
+        handle = self.handle
+
+        def done(result) -> None:
             self.refresh()
             self.status.setText(f"Imported {result.count} story/stories from the clipboard.")
 
-        run_guarded(self, "Paste content", action)
+        self.run_background(
+            "import-content",
+            "Importing the pasted text",
+            lambda: self.app.content.import_text(handle, text),
+            on_success=done,
+            busy_widgets=[self.import_button, self.paste_button, self.drop],
+            status=self.status,
+        )
 
     # --------------------------------------------------------------- edit
     def _load_selected(self) -> None:
@@ -300,9 +316,9 @@ class ContentPage(Page):
             return
         from app.agents.editorial_agent import EditorialAgent
 
-        def action() -> None:
-            agent = EditorialAgent(self.app.ai)
-            suggestion = agent.suggest_headline(self.handle, self._current_id)
+        handle, article_id = self.handle, self._current_id
+
+        def done(suggestion) -> None:
             self.title_edit.setText(suggestion.headline)
             if suggestion.subtitle:
                 self.subtitle_edit.setText(suggestion.subtitle)
@@ -313,17 +329,31 @@ class ContentPage(Page):
                 else "Suggested headline applied to the editor. Save to keep it."
             )
 
-        run_guarded(self, "Suggest headline", action)
+        self.run_background(
+            "headline",
+            "Suggesting a headline",
+            lambda: EditorialAgent(self.app.ai).suggest_headline(handle, article_id),
+            on_success=done,
+            busy_widgets=[self.headline_button, self.summary_button],
+            status=self.status,
+        )
 
     def _summarize(self) -> None:
         if self._current_id is None or self.handle is None:
             return
         from app.agents.editorial_agent import EditorialAgent
 
-        def action() -> None:
-            agent = EditorialAgent(self.app.ai)
-            data = agent.summarize(self.handle, self._current_id)
+        handle, article_id = self.handle, self._current_id
+
+        def done(data) -> None:
             self.lead_edit.setPlainText(data.get("lead", ""))
             self.status.setText("Lead and summary generated.")
 
-        run_guarded(self, "Generate summary", action)
+        self.run_background(
+            "summary",
+            "Generating the summary",
+            lambda: EditorialAgent(self.app.ai).summarize(handle, article_id),
+            on_success=done,
+            busy_widgets=[self.headline_button, self.summary_button],
+            status=self.status,
+        )

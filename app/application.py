@@ -65,7 +65,12 @@ class Application:
         self.projects = ProjectManager(self.paths, self.app_db, self.bus)
         self.content = ContentManager(self.bus)
         self.assets = AssetManager(self.ai, None, self.jobs, self.bus)
-        self.exporter = ExportService(None, self.bus)
+        self.exporter = ExportService(
+            None,
+            self.bus,
+            builtin_pdf_dpi=self.settings.settings.export.builtin_pdf_dpi,
+            render_workers=self.settings.settings.export.render_workers,
+        )
         self.diagnostics = DiagnosticsService(
             self.paths, self.settings, ai=self.ai, adobe=self.adobe, templates=self.templates
         )

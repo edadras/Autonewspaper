@@ -26,7 +26,6 @@ from app.ui.widgets.common import (
     DropArea,
     ImageCanvas,
     Toolbar,
-    run_guarded,
     show_error,
 )
 
@@ -171,8 +170,9 @@ class AssetsPage(Page):
             else:
                 expanded.append(path)
 
-        def action() -> None:
-            result = self.app.assets.import_files(self.handle, expanded)
+        handle = self.handle
+
+        def done(result) -> None:
             self.refresh()
             message = f"Imported {result.count} image(s)."
             if result.duplicates:
@@ -181,7 +181,14 @@ class AssetsPage(Page):
                 message += " Rejected: " + ", ".join(f"{f} ({r})" for f, r in result.rejected[:3])
             self.status.setText(message)
 
-        run_guarded(self, "Import images", action)
+        self.run_background(
+            "import-assets",
+            f"Importing and measuring {len(expanded)} image(s)",
+            lambda: self.app.assets.import_files(handle, expanded),
+            on_success=done,
+            busy_widgets=[self.import_button, self.drop, self.reanalyze_button],
+            status=self.status,
+        )
 
     # ------------------------------------------------------------ details
     def _show_selected(self) -> None:
@@ -228,28 +235,49 @@ class AssetsPage(Page):
         if self.handle is None:
             return
 
-        def action() -> None:
-            count = self.app.assets.auto_assign(self.handle)
+        handle = self.handle
+
+        def done(count) -> None:
             self.refresh()
             self.status.setText(f"Assigned {count} picture(s) to stories.")
 
-        run_guarded(self, "Auto-assign", action)
+        self.run_background(
+            "auto-assign",
+            "Assigning the pictures",
+            lambda: self.app.assets.auto_assign(handle),
+            on_success=done,
+            busy_widgets=[self.auto_button],
+            status=self.status,
+        )
 
     def _reanalyze(self) -> None:
         asset_id = self.table.selected_data()
         if self.handle is None:
             return
 
-        def action() -> None:
-            if asset_id is None:
-                count = self.app.assets.analyze_all(self.handle)
-                self.status.setText(f"Re-analysed {count} image(s).")
-            else:
-                self.app.assets.reanalyze(self.handle, asset_id)
-                self.status.setText("Image re-analysed.")
-            self.refresh()
+        handle = self.handle
 
-        run_guarded(self, "Analyse images", action)
+        def work():
+            if asset_id is None:
+                return ("all", self.app.assets.analyze_all(handle))
+            self.app.assets.reanalyze(handle, asset_id)
+            return ("one", 1)
+
+        def done(outcome) -> None:
+            kind, count = outcome
+            self.refresh()
+            self.status.setText(
+                f"Re-analysed {count} image(s)." if kind == "all" else "Image re-analysed."
+            )
+
+        self.run_background(
+            "analyse-assets",
+            "Analysing the images",
+            work,
+            on_success=done,
+            busy_widgets=[self.import_button, self.reanalyze_button, self.generate_button],
+            status=self.status,
+        )
 
     def _generate(self) -> None:
         if self.handle is None:
@@ -264,13 +292,21 @@ class AssetsPage(Page):
             return
         project = self.handle.project()
 
-        def action() -> None:
-            created = self.app.assets.generate_missing(
-                self.handle,
-                design_style=project["design_style"],
-                language=project["language"],
-            )
+        handle = self.handle
+
+        def done(created) -> None:
             self.refresh()
             self.status.setText(f"Generated {len(created)} image(s).")
 
-        run_guarded(self, "Generate images", action)
+        self.run_background(
+            "generate-assets",
+            "Generating the missing pictures",
+            lambda: self.app.assets.generate_missing(
+                handle,
+                design_style=project["design_style"],
+                language=project["language"],
+            ),
+            on_success=done,
+            busy_widgets=[self.generate_button, self.import_button, self.reanalyze_button],
+            status=self.status,
+        )

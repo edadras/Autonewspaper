@@ -93,6 +93,15 @@ class ExportSettings(BaseModel):
 
     default_preset: Literal["print", "digital", "web", "high_quality"] = "print"
     preview_dpi: int = Field(110, ge=36, le=600)
+    builtin_pdf_dpi: int = Field(200, ge=72, le=600)
+    """Resolution the built-in renderer rasterises PDF pages at.
+
+    It only applies when InDesign is unavailable: that PDF is a proof, not a
+    press file (it is RGB raster with no colour management, which the export
+    reports), so 200 dpi keeps it legible without the cost of 300.
+    """
+    render_workers: int = Field(4, ge=1, le=16)
+    """How many pages the built-in renderer rasterises at once."""
     export_idml: bool = True
     export_indd: bool = True
     export_jpeg_preview: bool = True

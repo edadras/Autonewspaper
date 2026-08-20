@@ -7,6 +7,7 @@ is deliberately free of any layout policy - policy lives in
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal
@@ -193,20 +194,35 @@ class Gap:
 def find_gaps(rects: list[Rect], area: Rect, min_ratio: float = 0.04) -> list[Gap]:
     """Locate empty bands large enough to count as excessive white space.
 
-    Scans the live area row by row on the column grid and merges adjacent
-    fully-empty cells into maximal rectangles; only gaps above *min_ratio* of
-    the page are reported, which is what the QA stage flags.
+    Scans the live area on a fixed grid and merges adjacent fully-empty cells
+    into maximal rectangles; only gaps above *min_ratio* of the page are
+    reported, which is what the QA stage flags.
+
+    Occupancy is filled by marking the cell range each frame covers rather
+    than testing every cell against every frame: the scorer and the constraint
+    checker both call this for every candidate of every page, so the
+    difference is felt on a large edition.
     """
     if area.area <= 0:
         return []
     steps_x, steps_y = 24, 32
     cell_w, cell_h = area.width / steps_x, area.height / steps_y
+    if cell_w <= 0 or cell_h <= 0:
+        return []
     occupied = [[False] * steps_x for _ in range(steps_y)]
-    for row in range(steps_y):
-        for col in range(steps_x):
-            cx = area.x + (col + 0.5) * cell_w
-            cy = area.y + (row + 0.5) * cell_h
-            occupied[row][col] = any(r.x <= cx <= r.right and r.y <= cy <= r.bottom for r in rects)
+
+    for rect in rects:
+        if rect.width <= 0 or rect.height <= 0:
+            continue
+        # Cells whose centre falls inside the frame.
+        first_col = max(0, int(math.ceil((rect.x - area.x) / cell_w - 0.5)))
+        last_col = min(steps_x - 1, int(math.floor((rect.right - area.x) / cell_w - 0.5)))
+        first_row = max(0, int(math.ceil((rect.y - area.y) / cell_h - 0.5)))
+        last_row = min(steps_y - 1, int(math.floor((rect.bottom - area.y) / cell_h - 0.5)))
+        for row in range(first_row, last_row + 1):
+            row_cells = occupied[row]
+            for col in range(first_col, last_col + 1):
+                row_cells[col] = True
 
     gaps: list[Gap] = []
     seen = [[False] * steps_x for _ in range(steps_y)]
@@ -219,7 +235,8 @@ def find_gaps(rects: list[Rect], area: Rect, min_ratio: float = 0.04) -> list[Ga
                 width += 1
             height = 1
             while row + height < steps_y and all(
-                not occupied[row + height][c] and not seen[row + height][c] for c in range(col, col + width)
+                not occupied[row + height][c] and not seen[row + height][c]
+                for c in range(col, col + width)
             ):
                 height += 1
             for r in range(row, row + height):

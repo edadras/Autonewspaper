@@ -328,11 +328,16 @@ class AdobeSettingsPage(Page):
         run_guarded(self, "Detect Adobe", action)
 
     def _health(self) -> None:
-        def action() -> None:
-            report = self.app.adobe.health_check(deep=True)
-            self.output.setPlainText(report.render())
+        def done(text: str) -> None:
+            self.output.setPlainText(text)
 
-        run_guarded(self, "Adobe pre-flight", action)
+        self.run_background(
+            "adobe-health",
+            "Running the Adobe pre-flight check",
+            lambda: self.app.adobe.health_check(deep=True).render(),
+            on_success=done,
+            busy_widgets=[self.check_button, self.detect_button, self.save_button],
+        )
 
 
 class DiagnosticsPage(Page):
@@ -368,9 +373,10 @@ class DiagnosticsPage(Page):
         if self.table.rowCount() == 0:
             self._run(deep=False)
 
-    def _run(self, deep: bool) -> None:
-        def action() -> None:
-            report = self.app.diagnostics.run(deep=deep)
+    def _run(self, deep: bool):
+        """Run the checks off the GUI thread; returns the task for tests."""
+
+        def done(report) -> None:
             self._report_text = report.render()
             self.table.fill(
                 [[c.name, c.status, c.detail] for c in report.checks],
@@ -383,7 +389,14 @@ class DiagnosticsPage(Page):
                 f"{errors} error(s), {warnings} warning(s)."
             )
 
-        run_guarded(self, "Diagnostics", action)
+        return self.run_background(
+            "diagnostics",
+            "Running the deep checks" if deep else "Running the checks",
+            lambda: self.app.diagnostics.run(deep=deep),
+            on_success=done,
+            busy_widgets=[self.run_button, self.deep_button],
+            status=self.summary,
+        )
 
     def _copy(self) -> None:
         from PySide6.QtWidgets import QApplication

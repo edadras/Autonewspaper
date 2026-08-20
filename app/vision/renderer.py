@@ -60,6 +60,9 @@ GUIDE = (206, 214, 224)
 IMAGE_FILL = (222, 226, 230)
 IMAGE_EDGE = (170, 176, 182)
 
+#: Upper bound on the per-renderer text measurement cache.
+WIDTH_CACHE_LIMIT = 200_000
+
 
 def shape(text: str, direction: str) -> str:
     """Pre-shape *text* for drawing, when Pillow cannot do it itself.
@@ -116,6 +119,7 @@ class PreviewRenderer:
         self.direction = template.direction
         self.script = "arabic" if template.language in ("fa", "ar") else "latin"
         self._colors = {color.name: color.to_rgb() for color in template.colors}
+        self._width_cache: dict[tuple[int, str, str], int] = {}
 
     # ------------------------------------------------------------ helpers
     def px(self, mm: float) -> int:
@@ -271,31 +275,68 @@ class PreviewRenderer:
             draw.text((x, y), drawn, font=font, fill=color, **_text_kwargs(direction))
 
     def _measure(self, text: str, font: Any, draw: ImageDraw.ImageDraw, direction: str | None = None) -> int:
+        """Exact advance width of *text*, cached per font and direction."""
+        if not text:
+            return 0
+        key = (id(font), direction or self.direction, text)
+        cached = self._width_cache.get(key)
+        if cached is not None:
+            return cached
         try:
             box = draw.textbbox((0, 0), text, font=font, **_text_kwargs(direction or self.direction))
-            return int(box[2] - box[0])
+            width = int(box[2] - box[0])
         except Exception:  # noqa: BLE001
-            return int(len(text) * 6)
+            width = int(len(text) * 6)
+        if len(self._width_cache) < WIDTH_CACHE_LIMIT:
+            self._width_cache[key] = width
+        return width
 
     def _wrap(self, text: str, font: Any, max_width_px: int, draw: ImageDraw.ImageDraw) -> list[str]:
-        """Greedy word wrap on the *logical* text (before shaping)."""
+        """Greedy word wrap on the *logical* text (before shaping).
+
+        Measuring the whole candidate line for every word makes wrapping
+        quadratic in the length of a paragraph, and a broadsheet page holds
+        thousands of words. Word widths are measured once each and cached -
+        newspaper copy repeats words heavily - and the running sum is only
+        confirmed with an exact measurement when it comes close to the column
+        width, which is where an approximation could actually break a line in
+        the wrong place.
+        """
+        if max_width_px <= 0:
+            return []
+        space = self._measure(" ", font, draw) or 1
+        # Below this fraction of the column the running sum cannot be wrong
+        # enough to matter; above it the exact width decides.
+        certain = max_width_px * 0.88
+
         lines: list[str] = []
         for paragraph in text.split("\n"):
             if not paragraph.strip():
                 lines.append("")
                 continue
-            words = paragraph.split(" ")
-            current = ""
-            for word in words:
-                candidate = f"{current} {word}".strip()
-                measured = self._measure(shape(candidate, self.direction), font, draw)
-                if measured <= max_width_px or not current:
-                    current = candidate
+            current: list[str] = []
+            running = 0
+            for word in paragraph.split(" "):
+                if not word:
+                    continue
+                word_width = self._measure(shape(word, self.direction), font, draw)
+                candidate_width = word_width if not current else running + space + word_width
+                if not current:
+                    current, running = [word], word_width
+                    continue
+                if candidate_width <= certain:
+                    current.append(word)
+                    running = candidate_width
+                    continue
+                exact = self._measure(shape(" ".join([*current, word]), self.direction), font, draw)
+                if exact <= max_width_px:
+                    current.append(word)
+                    running = exact
                 else:
-                    lines.append(current)
-                    current = word
+                    lines.append(" ".join(current))
+                    current, running = [word], word_width
             if current:
-                lines.append(current)
+                lines.append(" ".join(current))
         return lines
 
     # ------------------------------------------------------------- edition

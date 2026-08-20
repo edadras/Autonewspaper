@@ -103,25 +103,41 @@ class ProjectsPage(Page):
         if not slug:
             return
 
-        def action() -> None:
+        def work():
             handle = self.app.projects.open(slug)
-            copy = self.app.projects.duplicate(handle, f"{handle.project()['name']} (copy)")
+            return self.app.projects.duplicate(handle, f"{handle.project()['name']} (copy)")
+
+        def done(copy) -> None:
             log.info("Duplicated %s -> %s", slug, copy.slug)
             self.refresh()
+            self.info.setText(f"Duplicated to '{copy.slug}'.")
 
-        run_guarded(self, "Duplicate project", action)
+        self.run_background(
+            "duplicate-project",
+            "Duplicating the project",
+            work,
+            on_success=done,
+            busy_widgets=[self.duplicate_button, self.archive_button, self.delete_button],
+            status=self.info,
+        )
 
     def _archive(self) -> None:
         slug = self.table.selected_data()
         if not slug:
             return
 
-        def action() -> None:
+        def work():
             handle = self.app.projects.open(slug)
-            archive = self.app.projects.archive(handle)
-            self.info.setText(f"Archived to {archive}")
+            return self.app.projects.archive(handle)
 
-        run_guarded(self, "Archive project", action)
+        self.run_background(
+            "archive-project",
+            "Archiving the project",
+            work,
+            on_success=lambda archive: self.info.setText(f"Archived to {archive}"),
+            busy_widgets=[self.duplicate_button, self.archive_button, self.delete_button],
+            status=self.info,
+        )
 
     def _delete(self) -> None:
         slug = self.table.selected_data()

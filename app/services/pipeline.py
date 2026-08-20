@@ -798,6 +798,8 @@ class Pipeline:
         exporter = ExportService(
             self.adobe.indesign if ctx.adobe_strategy not in ("builtin-renderer", "none") else None,
             self.bus,
+            builtin_pdf_dpi=config.builtin_pdf_dpi,
+            render_workers=config.render_workers,
         )
         job = self.jobs.submit(
             "Export",
