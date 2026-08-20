@@ -393,3 +393,40 @@ def test_the_frame_registry_is_reset_whenever_the_document_changes():
         start = source.index(f"api.{entry} = function")
         body = source[start : start + 700]
         assert "registry = {}" in body, f"api.{entry} does not clear the frame registry"
+
+
+@pytest.mark.parametrize("library", ["indesign_lib.jsx", "photoshop_lib.jsx"])
+def test_a_document_the_operator_had_open_is_never_closed_unsaved(library):
+    """Discarding somebody's unsaved work is not this code's decision.
+
+    Both libraries fall back to the active document when asked for one they
+    did not open. That is fine for reading, but closing it with "do not save"
+    would throw away whatever the operator was doing.
+    """
+    from app.adobe.jsx import SCRIPTS_DIR
+
+    source = (SCRIPTS_DIR / library).read_text(encoding="utf-8")
+    close = source[source.index("api.closeDocument = function") :][:900]
+
+    assert "adopted === true" in close, "closeDocument does not check who opened the document"
+    for marker in ("SaveOptions.NO", "SaveOptions.DONOTSAVECHANGES"):
+        if marker in close:
+            assert close.index("adopted === true") < close.index(marker), (
+                "the guard has to come before the close"
+            )
+
+
+@pytest.mark.parametrize("library", ["indesign_lib.jsx", "photoshop_lib.jsx"])
+def test_opening_our_own_document_clears_the_adopted_flag(library):
+    """Otherwise one adopted document would protect every later one."""
+    from app.adobe.jsx import SCRIPTS_DIR
+
+    source = (SCRIPTS_DIR / library).read_text(encoding="utf-8")
+    openers = (
+        ["createDocument", "openTemplate", "openDocument", "useDocument"]
+        if library.startswith("indesign")
+        else ["createDocument", "openImage"]
+    )
+    for entry in openers:
+        start = source.index(f"api.{entry} = function")
+        assert "adopted = false" in source[start : start + 700], f"api.{entry} does not clear it"

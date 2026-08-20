@@ -73,6 +73,30 @@ class AdobeSettings(BaseModel):
     script_timeout_seconds: float = Field(600.0, gt=0)
     launch_timeout_seconds: float = Field(180.0, gt=0)
     close_documents_on_finish: bool = True
+    document_source: Literal["auto", "open_document", "template_file", "new_document"] = "auto"
+    """Where the InDesign document the edition is built into comes from.
+
+    ``auto``
+        Use the document the operator already has open, if there is one; then
+        the template's own InDesign file, if it names one; otherwise create a
+        new document. This is the order most people expect.
+    ``open_document``
+        Only ever build into an open document, and say so plainly when there
+        is none rather than quietly making a new one.
+    ``template_file``
+        Always open the ``.indt``/``.indd`` the template names.
+    ``new_document``
+        Always start from a blank document, ignoring whatever is open.
+    """
+    adopt_open_geometry: bool = True
+    """Plan the edition to fit the open document's own page setup.
+
+    A document the operator set up by hand rarely matches the template to the
+    millimetre. With this on, the page size, margins and columns are read from
+    that document and the layout is planned to fit it. With it off, a document
+    whose geometry differs from the template is not adopted at all, because
+    the plan would not fit the page it was being placed on.
+    """
 
 
 class LayoutSettings(BaseModel):

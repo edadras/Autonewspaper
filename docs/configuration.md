@@ -50,7 +50,9 @@ the defaults are restored, so a bad edit never stops the application starting.
     "allow_input_automation": false,
     "script_timeout_seconds": 600.0,
     "launch_timeout_seconds": 180.0,
-    "close_documents_on_finish": true
+    "close_documents_on_finish": true,
+    "document_source": "auto",
+    "adopt_open_geometry": true
   },
   "layout": {
     "candidates_per_page": 6,
@@ -122,6 +124,15 @@ linearly up to the number of physical cores.
 **`layout.candidates_per_page`** — how many compositions are built and scored
 per page. More candidates means better pages and a longer run; 6 is a good
 balance.
+
+**`adobe.document_source`** — which InDesign document a run builds into:
+`auto` (the one already open, then the template's file, then a new one),
+`open_document`, `template_file` or `new_document`. See the Adobe integration
+guide for what each means.
+
+**`adobe.adopt_open_geometry`** — plan the edition to fit the page setup of
+the document that is already open, rather than the template's. On by default;
+with it off, a document whose page differs from the template is not used.
 
 **`adobe.allow_input_automation`** — off by default. Turning it on lets the
 application move the mouse and type when no scripting or accessibility path

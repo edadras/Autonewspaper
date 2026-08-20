@@ -15,6 +15,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.core.errors import TemplateError
 from app.models.schemas import ElementType, TypographySpec
 
 TEMPLATE_SCHEMA_VERSION = "1.0"
@@ -310,6 +311,71 @@ class TemplateSpec(BaseModel):
                     f"below this template's {named} of {floor:.1f} pt"
                 )
         return self
+
+    # ------------------------------------------------------------- adapting
+    def adapted_to(self, geometry: dict[str, Any]) -> TemplateSpec:
+        """A copy of this template laid out for a document that already exists.
+
+        A document the operator set up by hand rarely matches the template to
+        the millimetre. Rather than refuse it, the page setup is taken from
+        that document and the master furniture is scaled to the new sheet, so
+        the masthead still spans the page and the folio still sits at its
+        foot. Everything that is not geometry - styles, colours, fonts, rules,
+        PDF presets - is the template's own.
+        """
+        width = float(geometry.get("width_mm") or self.page_width_mm)
+        height = float(geometry.get("height_mm") or self.page_height_mm)
+        if width <= 0 or height <= 0:
+            raise TemplateError(
+                "The open document reports a page with no size",
+                context={"width_mm": width, "height_mm": height},
+            )
+
+        adapted = self.model_copy(deep=True)
+        scale_x = width / self.page_width_mm
+        scale_y = height / self.page_height_mm
+        adapted.page_width_mm = width
+        adapted.page_height_mm = height
+        if geometry.get("facing_pages") is not None:
+            adapted.facing_pages = bool(geometry["facing_pages"])
+        bleed = geometry.get("bleed_mm")
+        if bleed is not None and float(bleed) >= 0:
+            adapted.bleed_mm = min(20.0, float(bleed))
+
+        margins = geometry.get("margins") or {}
+        if margins:
+            adapted.margins = MarginSpec(
+                top=float(margins.get("top", self.margins.top)),
+                bottom=float(margins.get("bottom", self.margins.bottom)),
+                inside=float(margins.get("inside", self.margins.inside)),
+                outside=float(margins.get("outside", self.margins.outside)),
+            )
+        columns = int(geometry.get("columns") or 0)
+        if columns > 0:
+            adapted.grid = adapted.grid.model_copy(update={"columns": columns})
+        gutter = geometry.get("gutter_mm")
+        if gutter is not None and float(gutter) > 0:
+            adapted.grid = adapted.grid.model_copy(update={"gutter_mm": float(gutter)})
+
+        for master in adapted.master_pages:
+            for element in master.elements:
+                element.x_mm *= scale_x
+                element.y_mm *= scale_y
+                element.width_mm *= scale_x
+                element.height_mm *= scale_y
+        adapted.masthead_height_mm *= scale_y
+        adapted.meta = dict(adapted.meta)
+        adapted.meta["adapted_from_document"] = geometry.get("name") or "open document"
+        return adapted
+
+    def geometry_matches(self, geometry: dict[str, Any], tolerance_mm: float = 1.0) -> bool:
+        """Whether *geometry* is the same sheet this template describes."""
+        width = float(geometry.get("width_mm") or 0)
+        height = float(geometry.get("height_mm") or 0)
+        return (
+            abs(width - self.page_width_mm) <= tolerance_mm
+            and abs(height - self.page_height_mm) <= tolerance_mm
+        )
 
     # --------------------------------------------------------------- access
     @property

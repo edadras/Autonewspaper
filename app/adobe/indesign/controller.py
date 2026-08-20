@@ -130,6 +130,32 @@ class InDesignController:
         builder.emit("__info")
         return self._run(builder.build(), "open_template").data or {}
 
+    def describe_open_document(self) -> dict[str, Any] | None:
+        """What InDesign already has open, or ``None``.
+
+        Reads the document's own page setup without modifying it, so the
+        layout can be planned to fit a page the operator laid out by hand.
+        """
+        builder = ScriptBuilder("indesign", "describe_open_document")
+        builder.call("setup", {"enableRedraw": False})
+        builder.call("describeOpenDocument", assign="__info")
+        builder.emit("__info")
+        try:
+            data = self._run(builder.build(), "describe_open_document").data
+        except (ScriptExecutionError, AdobeNotFoundError) as exc:
+            log.warning("Could not inspect the open InDesign document: %s", exc)
+            return None
+        return dict(data) if isinstance(data, dict) else None
+
+    def adopt_open_document(self) -> dict[str, Any] | None:
+        """Build into the document InDesign already has open."""
+        builder = ScriptBuilder("indesign", "adopt_open_document")
+        builder.call("setup", {"enableRedraw": False})
+        builder.call("adoptOpenDocument", assign="__info")
+        builder.emit("__info")
+        data = self._run(builder.build(), "adopt_open_document").data
+        return dict(data) if isinstance(data, dict) else None
+
     def open_document(self, path: Path | str) -> dict[str, Any]:
         """Open an existing document."""
         builder = ScriptBuilder("indesign", "open_document")
@@ -174,14 +200,16 @@ class InDesignController:
         template: TemplateSpec,
         *,
         template_document: str | None = None,
+        use_open_document: bool = False,
     ) -> dict[str, Any]:
-        """Create the document and build every page of *plan* in one call."""
+        """Prepare the document and build every page of *plan* in one call."""
         self.connect()
         script = build_document_script(
             plan.pages,
             template,
             page_count=len(plan.pages),
-            template_document=template_document or template.indesign_template_path,
+            template_document=None if use_open_document else template_document,
+            use_open_document=use_open_document,
         )
         self._emit(EventType.ADOBE_COMMAND, host="indesign", command="build_document", pages=len(plan.pages))
         result = self._run(script, "build_document")

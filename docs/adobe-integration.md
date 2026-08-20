@@ -95,6 +95,51 @@ controller performs the same work locally with Pillow and reports which engine
 ran. Background removal and CMYK conversion genuinely require Photoshop; the
 local path says so instead of pretending.
 
+## Which document the edition is built into
+
+When a run reaches InDesign it does not always start from a blank document.
+The choice is made *before* the pages are planned, because it can change the
+page the layout has to fit, and it is set in **Adobe Settings → Where the
+edition is built**:
+
+| Setting | What happens |
+| --- | --- |
+| `auto` (default) | The document already open in InDesign, if there is one; otherwise the InDesign file the template names; otherwise a new document |
+| `open_document` | Only ever the document already open — the run says so plainly when there is none rather than quietly making one |
+| `template_file` | Always the `.indt`/`.indd` the template names |
+| `new_document` | Always a new, blank document |
+
+### Using the document that is already open
+
+InDesign is asked to describe what it has open — page size, margins, columns,
+gutter, bleed, facing pages — without modifying it. A document the operator
+set up by hand rarely matches the template to the millimetre, so with
+**"Lay the edition out to fit the open document's own page setup"** on (the
+default) that geometry replaces the template's for the run: the pages are
+planned to the real sheet, and the template's master furniture is scaled to
+it, so the masthead still spans the page and the folio still sits at its
+foot. Everything that is not geometry — styles, colours, fonts, layout rules,
+PDF presets — stays the template's own. The run reports the substitution as a
+warning so it is never silent.
+
+With that option off, a document whose page differs from the template is not
+used at all and a new one is created, because a plan laid out for one sheet
+does not belong on another.
+
+**A document the operator opened is never closed**, whatever
+`close_documents_on_finish` says, and never saved on their behalf: the
+edition is left in it for them to look at. The same guard sits in the
+scripting library itself — both the InDesign and Photoshop libraries record
+whether they opened a document or merely found it, and refuse to close one
+they found without saving.
+
+### Linking a template to an InDesign file
+
+A template can name an `.indt`/`.indd` that its editions are built into.
+Select the template in the Templates page and press **InDesign file…**. The
+templates that ship with the application cannot be edited, so linking one
+offers to make an editable copy and to switch the project to it.
+
 ## Detection
 
 Installation paths are never hard-coded. Detection walks: an explicit setting,

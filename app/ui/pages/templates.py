@@ -37,6 +37,11 @@ class TemplatesPage(Page):
         self.default_button.clicked.connect(self._set_default)
         self.duplicate_button = toolbar.add(QPushButton("Duplicate"))
         self.duplicate_button.clicked.connect(self._duplicate)
+        self.indesign_button = toolbar.add(QPushButton("InDesign file…"))
+        self.indesign_button.setToolTip(
+            "Build this template's editions into an existing InDesign document instead of a blank one."
+        )
+        self.indesign_button.clicked.connect(self._link_indesign_document)
         toolbar.stretch()
         self.import_button = toolbar.add(QPushButton("Import…"))
         self.import_button.clicked.connect(self._import)
@@ -106,6 +111,7 @@ class TemplatesPage(Page):
                 f"baseline {spec.grid.baseline_mm} mm",
                 f"Column    : {spec.column_width_mm():.2f} mm",
                 f"Direction : {spec.direction}   Language: {spec.language}",
+                f"InDesign  : {spec.indesign_template_path or 'a new document each time'}",
                 "",
                 "Paragraph styles:",
             ]
@@ -154,6 +160,65 @@ class TemplatesPage(Page):
             self.status.setText(f"Created '{spec.id}'.")
 
         run_guarded(self, "Duplicate template", action)
+
+    def _link_indesign_document(self) -> None:
+        """Point the template at an ``.indt``/``.indd`` to build into."""
+        template_id = self.table.selected_data()
+        if not template_id:
+            return
+        template_id = str(template_id)
+        spec = self.app.templates.get(template_id)
+
+        path, _f = QFileDialog.getOpenFileName(
+            self,
+            "InDesign document for this template",
+            str(Path(spec.indesign_template_path).parent) if spec.indesign_template_path else "",
+            "InDesign documents (*.indt *.indd);;All files (*)",
+        )
+        if not path and spec.indesign_template_path:
+            if not confirm(
+                self,
+                "Clear the link",
+                f"Stop building '{spec.name}' into {Path(spec.indesign_template_path).name} "
+                "and go back to a new document each time?",
+            ):
+                return
+        elif not path:
+            return
+
+        if self.app.templates.is_builtin(template_id):
+            if not confirm(
+                self,
+                "Built-in template",
+                f"'{spec.name}' ships with the application and cannot be changed.\n\n"
+                "Create an editable copy linked to this document?",
+            ):
+                return
+            template_id = self._copy_id(template_id)
+
+        def action() -> None:
+            editable = self.app.templates.get(template_id)
+            editable.indesign_template_path = path or None
+            self.app.templates.save(editable)
+            if self.handle is not None and template_id != self.handle.project()["template_id"]:
+                self.app.projects.update(self.handle, template_id=template_id)
+            self.refresh()
+            self.status.setText(
+                f"'{editable.name}' builds into {Path(path).name}."
+                if path
+                else f"'{editable.name}' builds into a new document each time."
+            )
+
+        run_guarded(self, "Link an InDesign document", action)
+
+    def _copy_id(self, template_id: str) -> str:
+        """Duplicate a built-in template under a free id and return it."""
+        base = f"{template_id}_linked"
+        existing = set(self.app.templates.ids())
+        candidate, suffix = base, 2
+        while candidate in existing:
+            candidate, suffix = f"{base}_{suffix}", suffix + 1
+        return self.app.templates.duplicate(template_id, candidate).id
 
     def _import(self) -> None:
         path, _f = QFileDialog.getOpenFileName(

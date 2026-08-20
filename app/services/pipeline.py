@@ -70,6 +70,10 @@ class PipelineContext:
     warnings: list[str] = field(default_factory=list)
     errors: list[ErrorReport] = field(default_factory=list)
     adobe_strategy: str = "none"
+    document_source: str = "new_document"
+    """Where the InDesign document came from, once the layout stage decided."""
+    document_name: str = ""
+    """The open document adopted, when one was."""
     started: float = field(default_factory=time.monotonic)
     stages_done: list[PipelineStage] = field(default_factory=list)
 
@@ -429,10 +433,106 @@ class Pipeline:
             )
         log.info("Stage image generation: %d image(s) created via '%s'", len(created), provider)
 
+    # ------------------------------------------------------ document source
+    def _resolve_document_source(self, ctx: PipelineContext) -> None:
+        """Decide which InDesign document this edition is built into.
+
+        In ``auto`` the document the operator already has open wins, then the
+        InDesign file the template names, then a new document. The decision
+        happens before the pages are planned, because adopting an open
+        document can change the page setup the plan has to fit.
+        """
+        setting = self.settings.settings.adobe
+        choice = setting.document_source
+        ctx.document_source = "new_document"
+        ctx.document_name = ""
+
+        if choice == "new_document" or not self.adobe.indesign_app.installed:
+            if choice == "open_document" and not self.adobe.indesign_app.installed:
+                ctx.warn(
+                    "The settings ask for the document already open in InDesign, but InDesign is "
+                    "not installed on this machine; the built-in renderer is used instead."
+                )
+            return
+
+        if choice in ("auto", "open_document"):
+            geometry = self._open_document_geometry(ctx)
+            if geometry is not None:
+                self._adopt_open_document(ctx, geometry)
+                return
+            if choice == "open_document":
+                ctx.warn(
+                    "The settings ask for the document already open in InDesign, but no document "
+                    "is open; a new document is created instead."
+                )
+                return
+
+        if choice in ("auto", "template_file") and ctx.template.indesign_template_path:
+            path = Path(ctx.template.indesign_template_path)
+            if path.exists():
+                ctx.document_source = "template_file"
+                ctx.document_name = path.name
+                log.info("Building into the template document %s", path.name)
+            else:
+                ctx.warn(
+                    f"The template names an InDesign file that is missing ({path}); "
+                    "a new document is created instead."
+                )
+        elif choice == "template_file":
+            ctx.warn(
+                "The settings ask for the template's own InDesign file, but this template does "
+                "not name one; a new document is created instead."
+            )
+
+    def _open_document_geometry(self, ctx: PipelineContext) -> dict[str, Any] | None:
+        """Ask InDesign what it already has open, tolerating a failure."""
+        try:
+            return self.adobe.indesign.describe_open_document()
+        except Exception as exc:  # noqa: BLE001 - never fail the run over this
+            log.warning("Could not inspect the open InDesign document: %s", exc)
+            return None
+
+    def _adopt_open_document(self, ctx: PipelineContext, geometry: dict[str, Any]) -> None:
+        """Take the open document, adapting the template to its page setup."""
+        name = str(geometry.get("name") or "the open document")
+        if ctx.template.geometry_matches(geometry):
+            ctx.document_source = "open_document"
+            ctx.document_name = name
+            log.info("Building into the open document '%s'", name)
+            return
+
+        if not self.settings.settings.adobe.adopt_open_geometry:
+            ctx.warn(
+                f"'{name}' is open in InDesign but its page is "
+                f"{geometry.get('width_mm')}x{geometry.get('height_mm')} mm rather than the "
+                f"template's {ctx.template.page_width_mm:.0f}x{ctx.template.page_height_mm:.0f} mm; "
+                "a new document is created instead."
+            )
+            return
+
+        try:
+            ctx.template = ctx.template.adapted_to(geometry)
+        except Exception as exc:  # noqa: BLE001
+            ctx.warn(
+                f"'{name}' is open but its page setup could not be used ({exc}); a new document is created."
+            )
+            return
+        ctx.document_source = "open_document"
+        ctx.document_name = name
+        ctx.warn(
+            f"Laying the edition out to fit '{name}': "
+            f"{ctx.template.page_width_mm:.0f}x{ctx.template.page_height_mm:.0f} mm, "
+            f"{ctx.template.grid.columns} column(s), taken from the open document rather than the template."
+        )
+
     def _stage_layout(self, ctx: PipelineContext) -> None:
         """Build the layout plan."""
         project = ctx.handle.project()
         config = self.settings.settings.layout
+        # Where the document will come from has to be settled before the pages
+        # are planned: an edition built into a document the operator already
+        # set up must be planned to fit that page, not the template's.
+        self._resolve_document_source(ctx)
         engine = LayoutEngine(
             ctx.template,
             language=project["language"],
@@ -646,11 +746,20 @@ class Pipeline:
             return
 
         controller = self.adobe.indesign
-        job = self.jobs.submit(
-            "Build the InDesign document",
-            lambda _ctx: controller.build_document(ctx.plan, ctx.template),  # type: ignore[arg-type]
-            lane=JobLane.EXCLUSIVE,
-        )
+
+        def build(_ctx: Any) -> dict[str, Any]:
+            # One script prepares the document and builds every page, so the
+            # source decided during layout is applied atomically.
+            return controller.build_document(
+                ctx.plan,  # type: ignore[arg-type]
+                ctx.template,
+                template_document=(
+                    ctx.template.indesign_template_path if ctx.document_source == "template_file" else None
+                ),
+                use_open_document=ctx.document_source == "open_document",
+            )
+
+        job = self.jobs.submit("Build the InDesign document", build, lane=JobLane.EXCLUSIVE)
         self.jobs.wait([job], timeout=self.settings.settings.adobe.script_timeout_seconds + 120)
         if job.state.value != "succeeded":
             ctx.adobe_strategy = "builtin-renderer"
@@ -666,9 +775,10 @@ class Pipeline:
         if overflow:
             ctx.warn(f"InDesign reports {len(overflow)} overflowing frame(s) before QA")
         log.info(
-            "Stage InDesign: document built via '%s' with %d page(s)",
-            ctx.adobe_strategy,
+            "Stage InDesign: %d page(s) built via '%s' into %s",
             len(ctx.plan.pages),
+            ctx.adobe_strategy,
+            ctx.document_name or f"a {ctx.document_source.replace('_', ' ')}",
         )
 
     def _stage_qa(self, ctx: PipelineContext) -> None:
@@ -859,7 +969,12 @@ class Pipeline:
         except Exception as exc:  # noqa: BLE001
             ctx.warn(f"Could not snapshot the project: {exc}")
         self.projects.save(ctx.handle)
-        if self.settings.settings.adobe.close_documents_on_finish and self.adobe.indesign_app.installed:
+        if ctx.document_source == "open_document":
+            # The operator opened this document; closing it - and discarding
+            # its changes - is not ours to do. It is left open with the
+            # edition in it, which is the point of having adopted it.
+            log.info("Leaving '%s' open in InDesign", ctx.document_name or "the adopted document")
+        elif self.settings.settings.adobe.close_documents_on_finish and self.adobe.indesign_app.installed:
             try:
                 self.adobe.indesign.close_document(save=False)
             except Exception as exc:  # noqa: BLE001

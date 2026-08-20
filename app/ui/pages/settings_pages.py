@@ -24,6 +24,14 @@ from app.ui.widgets.common import DataTable, Toolbar, run_guarded
 
 log = logging.getLogger(__name__)
 
+#: The InDesign document a run builds into, in the order the settings offer it.
+DOCUMENT_SOURCES = (
+    ("auto", "The document already open, then the template's file, then a new one"),
+    ("open_document", "Only the document already open in InDesign"),
+    ("template_file", "Only the InDesign file the template names"),
+    ("new_document", "Always a new, blank document"),
+)
+
 PROVIDERS = ["heuristic", "openai", "anthropic", "gemini", "local"]
 IMAGE_PROVIDERS = ["none", "openai", "gemini", "stablediffusion", "local"]
 
@@ -254,6 +262,24 @@ class AdobeSettingsPage(Page):
         automation_form.addRow("Launch timeout (s)", self.launch_timeout)
         self.root.addWidget(automation_group)
 
+        document_group = QGroupBox("Where the edition is built")
+        document_form = QFormLayout(document_group)
+        self.document_source = QComboBox()
+        for value, label in DOCUMENT_SOURCES:
+            self.document_source.addItem(label, value)
+        self.document_source.setToolTip(
+            "Which InDesign document the pages are placed into when a run starts."
+        )
+        self.adopt_geometry = QCheckBox("Lay the edition out to fit the open document's own page setup")
+        self.adopt_geometry.setToolTip(
+            "A document set up by hand rarely matches the template exactly. With this on, the page "
+            "size, margins and columns are read from that document and the layout is planned to fit "
+            "it. With it off, a document whose page differs is not used at all."
+        )
+        document_form.addRow("Document", self.document_source)
+        document_form.addRow("", self.adopt_geometry)
+        self.root.addWidget(document_group)
+
         toolbar = Toolbar()
         self.detect_button = toolbar.add(QPushButton("Detect again"))
         self.detect_button.clicked.connect(self._detect)
@@ -278,6 +304,9 @@ class AdobeSettingsPage(Page):
         self.allow_ui.setChecked(adobe.allow_ui_automation)
         self.allow_input.setChecked(adobe.allow_input_automation)
         self.close_docs.setChecked(adobe.close_documents_on_finish)
+        index = self.document_source.findData(adobe.document_source)
+        self.document_source.setCurrentIndex(max(0, index))
+        self.adopt_geometry.setChecked(adobe.adopt_open_geometry)
         self.script_timeout.setValue(adobe.script_timeout_seconds)
         self.launch_timeout.setValue(adobe.launch_timeout_seconds)
         self.detected.setText(
@@ -300,6 +329,8 @@ class AdobeSettingsPage(Page):
                     "allow_ui_automation": self.allow_ui.isChecked(),
                     "allow_input_automation": self.allow_input.isChecked(),
                     "close_documents_on_finish": self.close_docs.isChecked(),
+                    "document_source": self.document_source.currentData(),
+                    "adopt_open_geometry": self.adopt_geometry.isChecked(),
                     "script_timeout_seconds": self.script_timeout.value(),
                     "launch_timeout_seconds": self.launch_timeout.value(),
                 }

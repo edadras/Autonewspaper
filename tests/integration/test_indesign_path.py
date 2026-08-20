@@ -28,6 +28,8 @@ class RecordingInDesign:
         self.overflow = overflow
         self._renderer = PreviewRenderer(template, dpi=80)
         self._plan: LayoutPlan | None = None
+        self.built_into = ""
+        self.built_page_mm: tuple[float, float] | None = None
 
     # -- session ---------------------------------------------------------
     def available(self) -> bool:
@@ -40,10 +42,38 @@ class RecordingInDesign:
     def disconnect(self) -> None:
         self.calls.append(("disconnect", ()))
 
+    # -- the document already open ---------------------------------------
+    #: Set to a geometry dictionary to stand for a document the operator has
+    #: open; ``None`` means InDesign has nothing open.
+    open_document: dict[str, Any] | None = None
+
+    def describe_open_document(self) -> dict[str, Any] | None:
+        self.calls.append(("describe_open_document", ()))
+        return dict(self.open_document) if self.open_document else None
+
+    def adopt_open_document(self) -> dict[str, Any] | None:
+        self.calls.append(("adopt_open_document", ()))
+        return dict(self.open_document) if self.open_document else None
+
+    def ensure_pages(self, count: int) -> int:
+        self.calls.append(("ensure_pages", (count,)))
+        return count
+
     # -- building --------------------------------------------------------
-    def build_document(self, plan: LayoutPlan, template) -> dict[str, Any]:
-        self.calls.append(("build_document", (len(plan.pages),)))
+    def build_document(
+        self,
+        plan: LayoutPlan,
+        template,
+        *,
+        template_document: str | None = None,
+        use_open_document: bool = False,
+    ) -> dict[str, Any]:
+        self.calls.append(("build_document", (len(plan.pages), template_document, use_open_document)))
         self._plan = plan
+        self.built_into = (
+            "open_document" if use_open_document else ("template_file" if template_document else "new")
+        )
+        self.built_page_mm = (template.page_width_mm, template.page_height_mm)
         return {"pages": [{"page": p.index} for p in plan.pages], "overflow": [], "strategy": "com"}
 
     def clear_page(self, page_index: int) -> int:
@@ -229,3 +259,144 @@ def test_a_failing_indesign_falls_back_and_says_so(application, project, templat
 def test_the_document_is_closed_when_the_run_finishes(application, project, with_indesign):
     application.pipeline.run(project, mode="auto")
     assert with_indesign.named("close_document")
+
+
+# ------------------------------------------- the document already open in InDesign
+def _open_geometry(**overrides) -> dict:
+    """A document standing open in InDesign, described the way the JSX does."""
+    geometry = {
+        "name": "Front page.indd",
+        "path": "C:/Work/Front page.indd",
+        "modified": False,
+        "pages": 1,
+        "width_mm": 297.0,
+        "height_mm": 420.0,
+        "facing_pages": True,
+        "bleed_mm": 3.0,
+        "columns": 6,
+        "gutter_mm": 4.0,
+        "margins": {"top": 14.0, "bottom": 14.0, "inside": 14.0, "outside": 12.0},
+        "version": "2024",
+    }
+    geometry.update(overrides)
+    return geometry
+
+
+def test_an_open_document_is_used_instead_of_a_new_one(application, project, with_indesign):
+    """What the operator already has open is where the edition goes."""
+    with_indesign.open_document = _open_geometry()
+
+    result = application.pipeline.run(project, mode="auto")
+
+    assert result.success, result.errors
+    assert with_indesign.named("describe_open_document"), "InDesign was never asked what is open"
+    assert with_indesign.built_into == "open_document"
+
+
+def test_the_edition_is_planned_to_fit_the_open_document(application, project, with_indesign):
+    """A document set up by hand rarely matches the template to the millimetre."""
+    with_indesign.open_document = _open_geometry(
+        name="Tabloid.indd",
+        width_mm=280.0,
+        height_mm=400.0,
+        columns=5,
+        gutter_mm=5.0,
+        margins={"top": 16.0, "bottom": 18.0, "inside": 16.0, "outside": 13.0},
+    )
+
+    result = application.pipeline.run(project, mode="auto")
+
+    assert result.success, result.errors
+    assert with_indesign.built_into == "open_document"
+    assert with_indesign.built_page_mm == (280.0, 400.0)
+
+    plan = LayoutPlan.load(project.layout_plan_path)
+    assert (plan.pages[0].width_mm, plan.pages[0].height_mm) == (280.0, 400.0)
+    assert plan.pages[0].columns == 5
+    # Every frame has to sit on the page it is actually being placed on.
+    for page in plan.pages:
+        for element in page.elements:
+            assert element.rect.right <= page.width_mm + 0.5, element.id
+            assert element.rect.bottom <= page.height_mm + 0.5, element.id
+    assert any("Tabloid.indd" in warning for warning in result.warnings)
+
+
+def test_a_document_the_operator_opened_is_left_open(application, project, with_indesign):
+    """Closing it - discarding their changes - is not ours to do."""
+    application.settings.set_path("adobe.close_documents_on_finish", True)
+    with_indesign.open_document = _open_geometry()
+
+    application.pipeline.run(project, mode="auto")
+
+    assert not with_indesign.named("close_document")
+
+
+def test_a_document_we_created_is_still_closed(application, project, with_indesign):
+    application.settings.set_path("adobe.close_documents_on_finish", True)
+    with_indesign.open_document = None
+
+    application.pipeline.run(project, mode="auto")
+
+    assert with_indesign.built_into == "new"
+    assert with_indesign.named("close_document")
+
+
+def test_the_open_document_can_be_ignored_by_setting(application, project, with_indesign):
+    application.settings.set_path("adobe.document_source", "new_document")
+    with_indesign.open_document = _open_geometry(width_mm=280.0, height_mm=400.0)
+
+    result = application.pipeline.run(project, mode="auto")
+
+    assert result.success
+    assert with_indesign.built_into == "new"
+    assert not with_indesign.named("describe_open_document")
+    assert with_indesign.built_page_mm == (297.0, 420.0)
+
+
+def test_a_mismatched_page_is_refused_when_adapting_is_off(application, project, with_indesign):
+    application.settings.set_path("adobe.adopt_open_geometry", False)
+    with_indesign.open_document = _open_geometry(name="A4.indd", width_mm=210.0, height_mm=297.0)
+
+    result = application.pipeline.run(project, mode="auto")
+
+    assert with_indesign.built_into == "new"
+    assert any("A4.indd" in warning and "new document" in warning for warning in result.warnings)
+
+
+def test_asking_for_an_open_document_when_there_is_none_says_so(application, project, with_indesign):
+    application.settings.set_path("adobe.document_source", "open_document")
+    with_indesign.open_document = None
+
+    result = application.pipeline.run(project, mode="auto")
+
+    assert result.success
+    assert with_indesign.built_into == "new"
+    assert any("no document" in warning.lower() for warning in result.warnings)
+
+
+def test_the_templates_own_indesign_file_is_opened_when_it_names_one(
+    application, project, with_indesign, tmp_path
+):
+    document = tmp_path / "house-style.indt"
+    document.write_bytes(b"not really an indd, but it exists")
+    with_indesign.open_document = None
+    application.templates.get_or_default(project.project()["template_id"]).indesign_template_path = str(
+        document
+    )
+
+    result = application.pipeline.run(project, mode="auto")
+
+    assert result.success
+    assert with_indesign.built_into == "template_file"
+
+
+def test_a_missing_template_document_falls_back_with_a_warning(application, project, with_indesign):
+    with_indesign.open_document = None
+    application.templates.get_or_default(
+        project.project()["template_id"]
+    ).indesign_template_path = "C:/gone/missing.indt"
+
+    result = application.pipeline.run(project, mode="auto")
+
+    assert with_indesign.built_into == "new"
+    assert any("missing.indt" in warning for warning in result.warnings)

@@ -119,6 +119,26 @@ The stage pills under the progress bar turn blue as each stage starts and
 green when it completes. **Stop** cancels; the project is left in a usable
 state and the run is recorded as cancelled.
 
+### Working into a document you already have open
+
+If InDesign already has a document open when a run starts, that is where the
+edition goes — you do not have to point at a file. Its page size, margins and
+columns are read from the document itself and the pages are planned to fit
+them, so a sheet you set up by hand is respected rather than overwritten with
+the template's measurements. The run says which document it used and what
+geometry it took from it.
+
+The document stays open when the run finishes, and is never saved for you:
+the edition is placed in it and left for you to look at.
+
+If you would rather it always started from a blank document, or always from
+one particular InDesign file, change **Adobe Settings → Where the edition is
+built**. To tie a template to a specific `.indt`/`.indd`, select it on the
+Templates page and press **InDesign file…**.
+
+Photoshop works differently: it is only used to prepare pictures, one file in
+and one file out, so whatever you have open there is left alone.
+
 ## Reviewing the result
 
 The Preview page shows each rendered page next to the issues QA found, with

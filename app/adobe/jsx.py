@@ -293,8 +293,13 @@ def build_document_script(
     page_count: int,
     result_path: Path | None = None,
     template_document: str | None = None,
+    use_open_document: bool = False,
 ) -> Script:
-    """Generate the script that creates the document and builds every page."""
+    """Generate the script that prepares the document and builds every page.
+
+    The document is whichever of the three the caller asked for: the one
+    InDesign already has open, the template's own InDesign file, or a new one.
+    """
     all_styles: dict[str, dict[str, Any]] = {}
     page_payloads: list[dict[str, Any]] = []
     for page in pages:
@@ -310,7 +315,14 @@ def build_document_script(
 
     builder = ScriptBuilder("indesign", name="build_document")
     builder.call("setup", {"enableRedraw": False})
-    if template_document:
+    if use_open_document:
+        # Fails loudly rather than quietly making a new document: the plan was
+        # laid out to fit the open one, so anything else is the wrong page.
+        builder.raw("if (AINS.ID.adoptOpenDocument() === null) {")
+        builder.raw('    throw new Error("No InDesign document is open to build into");')
+        builder.raw("}")
+        builder.call("ensurePages", page_count)
+    elif template_document:
         builder.call("openTemplate", str(template_document), True)
         builder.call("ensurePages", page_count)
     else:

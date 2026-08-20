@@ -435,3 +435,66 @@ def test_walking_every_page_of_a_finished_edition_raises_nothing(
         if record.levelno >= logging.ERROR and record.name.startswith("app.ui")
     ]
     assert offenders == []
+
+
+# ------------------------------------------ choosing the InDesign document
+def _page(window, title: str):
+    return next(page for page in window.pages if page.title == title)
+
+
+def test_the_document_source_can_be_chosen_and_saved(window, qt_app):
+    """§Adobe settings: the operator decides which document a run builds into."""
+    page = _page(window, "Adobe Settings")
+    page.refresh()
+    qt_app.processEvents()
+
+    values = [page.document_source.itemData(i) for i in range(page.document_source.count())]
+    assert values == ["auto", "open_document", "template_file", "new_document"]
+    assert page.document_source.currentData() == "auto"
+
+    page.document_source.setCurrentIndex(values.index("new_document"))
+    page.adopt_geometry.setChecked(False)
+    page._save()
+    page.tasks.wait_all(5000)
+    qt_app.processEvents()
+
+    adobe = window.app.settings.settings.adobe
+    assert adobe.document_source == "new_document"
+    assert adobe.adopt_open_geometry is False
+
+    page.refresh()
+    qt_app.processEvents()
+    assert page.document_source.currentData() == "new_document"
+
+
+def test_linking_an_indesign_file_copies_a_builtin_template(window, qt_app, monkeypatch, tmp_path):
+    """Built-ins cannot be edited, so the link goes onto an editable copy."""
+    document = tmp_path / "house-style.indt"
+    document.write_bytes(b"stand-in for a real InDesign template")
+
+    page = _page(window, "Templates")
+    page.refresh()
+    qt_app.processEvents()
+    builtin = window.app.settings.settings.default_template_id
+    assert window.app.templates.is_builtin(builtin)
+    page.table.select_data(builtin)
+    qt_app.processEvents()
+
+    monkeypatch.setattr(
+        "app.ui.pages.templates.QFileDialog.getOpenFileName",
+        lambda *a, **k: (str(document), ""),
+    )
+    monkeypatch.setattr("app.ui.pages.templates.confirm", lambda *a, **k: True)
+
+    page._link_indesign_document()
+    qt_app.processEvents()
+
+    copies = [tid for tid in window.app.templates.ids() if tid.startswith(f"{builtin}_linked")]
+    assert copies, "no editable copy was created"
+    copy = window.app.templates.get(copies[0])
+    assert copy.indesign_template_path == str(document)
+    # The built-in itself is untouched.
+    assert window.app.templates.get(builtin).indesign_template_path is None
+    # And the project now uses the copy, so the link actually takes effect.
+    assert page.handle is not None
+    assert page.handle.project()["template_id"] == copy.id

@@ -272,6 +272,15 @@ class DataTable(QTableWidget):
             return None
         return self.item(items[0].row(), 0).data(Qt.ItemDataRole.UserRole)
 
+    def select_data(self, value: Any) -> bool:
+        """Select the row whose ``UserRole`` payload is *value*."""
+        for row in range(self.rowCount()):
+            item = self.item(row, 0)
+            if item is not None and item.data(Qt.ItemDataRole.UserRole) == value:
+                self.selectRow(row)
+                return True
+        return False
+
 
 class Toolbar(QWidget):
     """A horizontal row of buttons with an optional stretch."""

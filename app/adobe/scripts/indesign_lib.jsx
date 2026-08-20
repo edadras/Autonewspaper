@@ -13,6 +13,7 @@ AINS.ID = (function () {
     var api = {};
     var registry = {};          /* frame label -> page item, within one run   */
     var doc = null;
+    var adopted = false;      /* the document was already open when we arrived */
 
     /* ------------------------------------------------------------ session */
 
@@ -37,12 +38,15 @@ AINS.ID = (function () {
     api.doc = function () {
         if (doc === null) {
             if (app.documents.length === 0) { throw new Error("No InDesign document is open"); }
+            /* Whatever the operator has in front of them: fine to work in,
+             * not ours to close and discard. */
             doc = app.activeDocument;
+            adopted = true;
         }
         return doc;
     };
 
-    api.useDocument = function (document) { registry = {}; doc = document; return doc; };
+    api.useDocument = function (document) { registry = {}; adopted = false; doc = document; return doc; };
 
     /* ----------------------------------------------------------- document */
 
@@ -52,6 +56,7 @@ AINS.ID = (function () {
          * document - and every lookup would find an item that no longer
          * belongs to the document being built. */
         registry = {};
+        adopted = false;
         var document = app.documents.add(false);
         var prefs = document.documentPreferences;
         prefs.pageWidth = spec.page_width_mm;
@@ -79,6 +84,7 @@ AINS.ID = (function () {
 
     api.openTemplate = function (path, asCopy) {
         registry = {};
+        adopted = false;
         var file = new File(path);
         if (!file.exists) { throw new Error("Template not found: " + path); }
         doc = app.open(file, false, (asCopy === false) ? OpenOptions.OPEN_ORIGINAL : OpenOptions.OPEN_COPY);
@@ -90,6 +96,7 @@ AINS.ID = (function () {
 
     api.openDocument = function (path) {
         registry = {};
+        adopted = false;
         var file = new File(path);
         if (!file.exists) { throw new Error("Document not found: " + path); }
         doc = app.open(file, false);
@@ -108,6 +115,60 @@ AINS.ID = (function () {
             spreads: document.spreads.length,
             version: String(app.version)
         };
+    };
+
+    /* Describe whatever the operator already has open, without touching it.
+     *
+     * Returns null when InDesign has no document. The geometry is read from
+     * the document itself rather than from the template, so the layout can be
+     * planned to fit a page the operator set up by hand. Margins come from
+     * page one, which is where a master's margins are visible; a document
+     * whose pages disagree reports the first page and the Python side warns.
+     */
+    api.describeOpenDocument = function () {
+        if (app.documents.length === 0) { return null; }
+        var document = app.activeDocument;
+        var prefs = document.documentPreferences;
+        var info = {
+            name: String(document.name),
+            path: document.saved ? String(document.fullName) : null,
+            modified: document.modified === true,
+            pages: document.pages.length,
+            width_mm: prefs.pageWidth,
+            height_mm: prefs.pageHeight,
+            facing_pages: prefs.facingPages === true,
+            bleed_mm: 0,
+            columns: 0,
+            gutter_mm: 0,
+            margins: null,
+            version: String(app.version)
+        };
+        try { info.bleed_mm = prefs.documentBleedTopOffset; } catch (e) {}
+        try {
+            var margins = document.pages[0].marginPreferences;
+            /* The DOM keeps left/right even where the interface says
+             * inside/outside. Page one is a right-hand page, so its left
+             * margin is the one at the spine. */
+            info.margins = {
+                top: margins.top,
+                bottom: margins.bottom,
+                inside: margins.left,
+                outside: margins.right
+            };
+            info.columns = margins.columnCount;
+            info.gutter_mm = margins.columnGutter;
+        } catch (e) { AINS.log("Margins not readable: " + e); }
+        return info;
+    };
+
+    /* Build into the document the operator already has open. */
+    api.adoptOpenDocument = function () {
+        if (app.documents.length === 0) { return null; }
+        registry = {};
+        doc = app.activeDocument;
+        adopted = true;
+        AINS.log("Using the open document '" + doc.name + "'");
+        return api.info();
     };
 
     api.ensurePages = function (count) {
@@ -677,8 +738,18 @@ AINS.ID = (function () {
 
     api.closeDocument = function (save) {
         if (doc === null) { return false; }
+        if (adopted === true && save !== true) {
+            /* The operator opened this one, and it may hold unsaved work.
+             * Let go of the reference rather than close it. */
+            AINS.log("Leaving '" + doc.name + "' open: it was already open here");
+            doc = null;
+            adopted = false;
+            registry = {};
+            return false;
+        }
         doc.close(save ? SaveOptions.YES : SaveOptions.NO);
         doc = null;
+        adopted = false;
         registry = {};
         return true;
     };

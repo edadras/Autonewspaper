@@ -10,6 +10,7 @@
 AINS.PS = (function () {
     var api = {};
     var doc = null;
+    var adopted = false;      /* the document was already open when we arrived */
 
     api.setup = function () {
         app.preferences.rulerUnits = Units.PIXELS;
@@ -22,7 +23,10 @@ AINS.PS = (function () {
     api.doc = function () {
         if (doc === null) {
             if (app.documents.length === 0) { throw new Error("No Photoshop document is open"); }
+            /* Falling back to whatever the operator has in front of them is
+             * fine for reading, but it is not ours to close and discard. */
             doc = app.activeDocument;
+            adopted = true;
         }
         return doc;
     };
@@ -31,10 +35,12 @@ AINS.PS = (function () {
         var file = new File(path);
         if (!file.exists) { throw new Error("Image not found: " + path); }
         doc = app.open(file);
+        adopted = false;
         return api.info();
     };
 
     api.createDocument = function (spec) {
+        adopted = false;
         var mode = NewDocumentMode.RGB;
         if (spec.mode === "cmyk") { mode = NewDocumentMode.CMYK; }
         if (spec.mode === "gray") { mode = NewDocumentMode.GRAYSCALE; }
@@ -269,8 +275,17 @@ AINS.PS = (function () {
 
     api.closeDocument = function (save) {
         if (doc === null) { return false; }
+        if (adopted === true && save !== true) {
+            /* Discarding an operator's unsaved work is never this code's
+             * decision. Let go of the reference instead. */
+            AINS.log("Leaving '" + doc.name + "' open: it was already open here");
+            doc = null;
+            adopted = false;
+            return false;
+        }
         doc.close(save ? SaveOptions.SAVECHANGES : SaveOptions.DONOTSAVECHANGES);
         doc = null;
+        adopted = false;
         return true;
     };
 
