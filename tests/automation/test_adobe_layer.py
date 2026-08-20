@@ -190,6 +190,41 @@ def test_bridge_refuses_to_connect_without_an_installation(tmp_path):
         bridge.connect(launch=False)
 
 
+def test_each_thread_gets_its_own_com_connection():
+    """COM proxies belong to the apartment that created them.
+
+    The pipeline runs on a worker thread while diagnostics and the Adobe
+    Settings page connect from the GUI thread. Sharing one proxy between them
+    raises RPC_E_WRONG_THREAD on Windows, which no Linux test would ever see,
+    so the caching itself is pinned here.
+    """
+    import threading
+
+    from app.adobe.bridge import ComStrategy
+    from app.adobe.detect import AdobeApp
+
+    strategy = ComStrategy(AdobeApp(kind="indesign"))
+    strategy._client = "proxy-dispatched-on-this-thread"
+
+    from_worker: list = []
+    worker = threading.Thread(target=lambda: from_worker.append(strategy._client))
+    worker.start()
+    worker.join()
+
+    assert from_worker == [None]
+    assert strategy._client == "proxy-dispatched-on-this-thread"
+
+    # Closing on one thread must not blind the other.
+    def close_on_worker():
+        strategy._client = "worker-proxy"
+        strategy.close()
+
+    worker = threading.Thread(target=close_on_worker)
+    worker.start()
+    worker.join()
+    assert strategy._client == "proxy-dispatched-on-this-thread"
+
+
 def test_queue_strategy_round_trips_a_job_file(tmp_path):
     """The queue path is exercised by simulating the resident runner."""
     import threading

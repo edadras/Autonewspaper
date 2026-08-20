@@ -326,3 +326,79 @@ def test_assigning_a_picture_is_undoable(window, qt_app, application, project):
 
     application.undo.undo()
     assert application.assets.snapshot_assignments(project)[asset_id] == before
+
+
+# ------------------------------------------------------- unhandled failures
+@pytest.fixture
+def reported_errors(window, monkeypatch):
+    """Collect what the crash guard reports, without opening a modal dialog."""
+    shown: list[tuple] = []
+    monkeypatch.setattr(
+        "app.ui.widgets.common.show_error",
+        lambda parent, title, message, detail="": shown.append((title, message, detail)),
+    )
+    reports: list = []
+    window.crash_guard.reported.connect(reports.append)
+    return reports, shown
+
+
+def test_an_exception_escaping_a_slot_is_reported_not_fatal(qt_app, window, reported_errors):
+    """§32: nothing may take the window down, and the report must be complete."""
+    import sys
+
+    reports, shown = reported_errors
+
+    try:
+        raise ValueError("a slot blew up")
+    except ValueError:
+        sys.excepthook(*sys.exc_info())
+
+    qt_app.processEvents()
+
+    # The window is still there and still navigable - nothing aborted.
+    window.show_page("Dashboard")
+    assert window.stack.currentWidget() is not None
+    assert len(reports) == 1
+    report = reports[0]
+    assert report.error_type == "ValueError"
+    assert report.message == "a slot blew up"
+    assert report.component.value == "ui"
+    assert report.timestamp is not None
+    assert "ValueError" in (report.stack_trace or "")
+    assert shown and "a slot blew up" in shown[0][1]
+
+
+def test_a_repeating_fault_is_only_shown_once(qt_app, window, reported_errors):
+    """A broken paint event fires on every repaint; one dialog is enough."""
+    import sys
+
+    reports, _shown = reported_errors
+
+    for _ in range(5):
+        try:
+            raise RuntimeError("repaint failed")
+        except RuntimeError:
+            sys.excepthook(*sys.exc_info())
+    qt_app.processEvents()
+
+    assert len(reports) == 1
+
+
+def test_a_worker_thread_failure_is_logged_without_a_dialog(qt_app, window, reported_errors, caplog):
+    """A background thread must never build a widget."""
+    import logging
+    import threading
+
+    reports, _shown = reported_errors
+
+    def explode():
+        raise OSError("the worker could not write")
+
+    with caplog.at_level(logging.CRITICAL, logger="app.unhandled"):
+        thread = threading.Thread(target=explode, name="ains-test-worker")
+        thread.start()
+        thread.join()
+    qt_app.processEvents()
+
+    assert reports == []
+    assert any("the worker could not write" in record.getMessage() for record in caplog.records)

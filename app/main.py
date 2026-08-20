@@ -99,8 +99,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    exit_code = qt_app.exec()
-    application.shutdown()
+    try:
+        exit_code = qt_app.exec()
+    finally:
+        # Whatever brought the loop down, the AI loop thread, the job pool and
+        # the open Adobe documents still have to be released.
+        application.shutdown()
     return exit_code
 
 

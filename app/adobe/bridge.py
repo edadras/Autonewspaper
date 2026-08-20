@@ -25,6 +25,7 @@ import logging
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -165,10 +166,22 @@ class ComStrategy(ExecutionStrategy):
 
     def __init__(self, app: AdobeApp) -> None:
         super().__init__(app)
-        self._client: Any = None
+        # COM objects live in the apartment of the thread that created them:
+        # a proxy dispatched on the GUI thread raises RPC_E_WRONG_THREAD when
+        # the pipeline's worker thread uses it. Each thread therefore keeps
+        # its own connection, and initialises COM for itself.
+        self._local = threading.local()
+
+    @property
+    def _client(self) -> Any:
+        return getattr(self._local, "client", None)
+
+    @_client.setter
+    def _client(self, value: Any) -> None:
+        self._local.client = value
 
     def _dispatch(self) -> Any:
-        """Return a live COM object, connecting on first use."""
+        """Return a live COM object for the calling thread, connecting on first use."""
         if self._client is not None:
             return self._client
         if not IS_WINDOWS:
@@ -184,7 +197,7 @@ class ComStrategy(ExecutionStrategy):
             ) from exc
         try:
             pythoncom.CoInitialize()
-        except Exception:  # pragma: no cover - already initialised
+        except Exception:  # pragma: no cover - this thread already initialised COM
             pass
         prog_ids = [self.app.prog_id] if self.app.prog_id else []
         from app.adobe.detect import INDESIGN_PROGIDS, PHOTOSHOP_PROGIDS
@@ -243,7 +256,7 @@ class ComStrategy(ExecutionStrategy):
         return ScriptResult.parse(text, self.name, duration)
 
     def close(self) -> None:
-        """Drop the COM reference."""
+        """Drop this thread's COM reference."""
         self._client = None
 
 

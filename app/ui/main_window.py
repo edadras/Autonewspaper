@@ -36,6 +36,7 @@ from app.core.jobs import CancelToken
 from app.models.schemas import ApprovalRequest, PipelineResult, PipelineStage
 from app.services.project_manager import ProjectHandle
 from app.ui.bridge import EventBridge
+from app.ui.crash_guard import CrashGuard
 from app.ui.pages.assets import AssetsPage
 from app.ui.pages.base import Page
 from app.ui.pages.content import ContentPage
@@ -131,6 +132,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.app = application
         self.bridge = EventBridge(application.bus, self)
+        # §32: an exception escaping a slot or a paint event must be reported,
+        # not abort the process.
+        self.crash_guard = CrashGuard(self).install()
         self.setWindowTitle("AI Newspaper Studio")
         self.resize(1440, 920)
 
@@ -464,6 +468,7 @@ class MainWindow(QMainWindow):
             self.bridge.close()
         except Exception:  # noqa: BLE001
             pass
+        self.crash_guard.uninstall()
         event.accept()
 
 
