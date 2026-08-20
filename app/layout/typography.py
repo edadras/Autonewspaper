@@ -273,6 +273,28 @@ class TypographyEngine:
         return per_line * possible_lines
 
     # ---------------------------------------------------------- estimates
+    def measure_overflow(
+        self, text: str, rect: Rect, typography: TypographySpec
+    ) -> tuple[float, int]:
+        """Overflow fraction and line count of *text* at an existing size.
+
+        Used after a correction changed the geometry or the point size: the
+        size has already been decided, so it must be measured, not re-picked.
+        """
+        if not text.strip() or rect.width <= 0 or rect.height <= 0:
+            return (0.0, 0)
+        lines = T.estimate_lines(
+            text,
+            rect.width,
+            typography.size_pt,
+            columns=max(1, typography.columns),
+            gutter_mm=typography.column_gutter_mm,
+            language=self.language,
+        )
+        usable = rect.height - pt_to_mm(typography.space_before_pt + typography.space_after_pt)
+        needed = lines * pt_to_mm(typography.leading_pt)
+        return (round(max(0.0, (needed - usable) / max(1e-6, usable)), 4), lines)
+
     def height_for(
         self, text: str, width_mm: float, element_type: ElementType, columns: int = 1
     ) -> float:

@@ -310,21 +310,36 @@ class HeuristicProvider(AIProvider):
             pages[1].append(analysis["article_id"])
         remaining = remaining[front_slots:]
 
+        # Distribute the rest so every page carries a comparable amount of
+        # copy, while keeping a category on one page where that still balances.
         category_pages: dict[str, int] = {}
-        next_section_page = 2
+        load: dict[int, float] = {index: 0.0 for index in pages}
+        for page_index, ids in pages.items():
+            load[page_index] = float(len(ids))
+
+        def demand(analysis: dict[str, Any]) -> float:
+            words = analysis.get("word_count") or 0
+            return 1.0 + min(4.0, words / 250.0)
+
         for analysis in remaining:
             category = analysis["category"]
-            if category not in category_pages and next_section_page <= page_count:
-                category_pages[category] = next_section_page
-                next_section_page += 1
-            page = category_pages.get(category, 0)
-            if not page or len(pages[page]) >= capacity[page]:
-                page = min(
-                    (p for p in pages if p > 1 and len(pages[p]) < capacity[p]),
-                    key=lambda p: (len(pages[p]), p),
-                    default=page_count,
-                )
+            options = [p for p in pages if p > 1 and len(pages[p]) < capacity[p]] or [
+                p for p in pages if p > 1
+            ] or [1]
+            preferred = category_pages.get(category)
+
+            def cost(page_index: int) -> tuple[float, int]:
+                penalty = load[page_index]
+                if preferred == page_index:
+                    penalty -= 1.2
+                elif preferred is None and not pages[page_index]:
+                    penalty -= 0.4
+                return (penalty, page_index)
+
+            page = min(options, key=cost)
             pages[page].append(analysis["article_id"])
+            load[page] += demand(analysis)
+            category_pages.setdefault(category, page)
         return pages
 
     @staticmethod

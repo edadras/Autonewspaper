@@ -33,6 +33,7 @@ ACTION_LIMITS: dict[str, dict[str, tuple[float, float]]] = {
     "move_element": {"dx_mm": (-40.0, 40.0), "dy_mm": (-40.0, 40.0)},
     "reduce_text": {"ratio": (0.5, 0.95)},
     "reduce_font": {"delta_pt": (0.25, 1.5)},
+    "increase_font": {"delta_pt": (0.25, 2.0)},
     "swap_elements": {},
     "drop_element": {},
     "rebuild_page": {},
@@ -72,6 +73,11 @@ class CorrectionResult:
     def improved(self) -> bool:
         """Whether the page scored better afterwards."""
         return self.score_after > self.score_before + 0.01
+
+    @property
+    def regressed(self) -> bool:
+        """Whether the geometric score got worse."""
+        return self.score_after < self.score_before - 0.01
 
     def to_dict(self) -> dict[str, Any]:
         """JSON-friendly form."""
@@ -145,12 +151,23 @@ class LayoutCorrector:
             elif issue.type is IssueType.EXCESSIVE_WHITESPACE:
                 target = self._neighbour_of_gap(page, issue.rect)
                 if target is not None:
-                    actions.append(
-                        CorrectionAction(
-                            "grow_element", target.id, {"factor": 1.12},
-                            "Grow the neighbouring story into the empty block",
+                    if self._under_filled(target):
+                        # The frame already covers the space; its copy simply
+                        # does not fill it, so set the story larger instead of
+                        # making an already page-wide frame bigger.
+                        actions.append(
+                            CorrectionAction(
+                                "increase_font", target.id, {"delta_pt": 1.0},
+                                "Set the story larger so it fills its frame",
+                            )
                         )
-                    )
+                    else:
+                        actions.append(
+                            CorrectionAction(
+                                "grow_element", target.id, {"factor": 1.12},
+                                "Grow the neighbouring story into the empty block",
+                            )
+                        )
             elif issue.type is IssueType.SMALL_FONT and element is not None:
                 actions.append(
                     CorrectionAction(
@@ -249,9 +266,13 @@ class LayoutCorrector:
         )
         result.score_after = score.total
 
-        if result.applied and not result.improved:
+        # Only a regression is rolled back. A correction that leaves the
+        # geometric score unchanged may still have fixed something only the
+        # rendered pixels show (white space, an under-filled frame), and the
+        # next iteration of the loop is what judges that.
+        if result.applied and result.regressed:
             log.info(
-                "Correction pass on page %d did not improve the score (%.1f -> %.1f); rolling back",
+                "Correction pass on page %d made the score worse (%.1f -> %.1f); rolling back",
                 page.index, result.score_before, result.score_after,
             )
             page.elements = snapshot.elements
@@ -259,7 +280,7 @@ class LayoutCorrector:
             page.score_breakdown = snapshot.score_breakdown
             page.meta = snapshot.meta
             result.score_after = snapshot.score
-            result.rejected.extend((a, "rolled back: no improvement") for a in result.applied)
+            result.rejected.extend((a, "rolled back: score regressed") for a in result.applied)
             result.applied = []
         return result
 
@@ -383,6 +404,18 @@ class LayoutCorrector:
             element.meta["used_min_size"] = abs(new_size - minimum) < 0.01
             return True
 
+        if action.action == "increase_font" and element and element.typography:
+            delta = float(action.args["delta_pt"])
+            maximum = self.engine.typography.style_spec(element.type).max_size_pt
+            new_size = min(maximum, element.typography.size_pt + delta)
+            if abs(new_size - element.typography.size_pt) < 0.05:
+                return False
+            ratio = element.typography.leading_pt / max(1e-6, element.typography.size_pt)
+            element.typography.size_pt = round(new_size, 2)
+            element.typography.leading_pt = round(new_size * ratio, 2)
+            element.meta["used_min_size"] = False
+            return True
+
         if action.action == "swap_elements" and element:
             other = page.element(str(action.args.get("element_id_b", "")))
             if other is None:
@@ -403,26 +436,41 @@ class LayoutCorrector:
         """Recompose the page with another strategy, keeping its content."""
         blocks = page.meta.get("blocks")
         if not blocks:
-            log.info("Page %d cannot be rebuilt: the source blocks were not kept", page.index)
+            log.info("Page %d cannot be rebuilt: the source stories were not kept", page.index)
             return False
-        from app.layout.strategies import ArticleBlock
+        from app.layout.strategies import block_from_payload
 
         try:
-            restored = [ArticleBlock(**block) for block in blocks]
-        except TypeError as exc:
-            log.warning("Cannot restore the blocks of page %d: %s", page.index, exc)
+            restored = [block_from_payload(block) for block in blocks]
+        except (TypeError, ValueError) as exc:
+            log.warning("Cannot restore the stories of page %d: %s", page.index, exc)
             return False
-        allowed = [strategy] if strategy else self.engine.template.layout_rules.allowed_strategies
-        plan = self.engine.plan_page(
-            page.index,
-            restored,
-            section=page.section,
-            page_count=page.meta.get("page_count", page.index),
-        )
+
+        template = self.engine.template
+        previous = list(template.layout_rules.allowed_strategies)
+        if strategy:
+            template.layout_rules.allowed_strategies = [strategy]
+        try:
+            plan = self.engine.plan_page(
+                page.index,
+                restored,
+                section=page.section,
+                page_count=int(page.meta.get("page_count", page.index)),
+            )
+        finally:
+            template.layout_rules.allowed_strategies = previous
+
         if not plan.page.elements:
             return False
-        page.elements = plan.page.elements
-        page.meta.update({"strategy": plan.page.meta.get("strategy"), "rebuilt_with": allowed})
+        locked = [e for e in page.elements if e.locked]
+        page.elements = locked + [e for e in plan.page.elements if not e.locked]
+        page.meta.update(
+            {
+                "strategy": plan.page.meta.get("strategy"),
+                "rebuilt_with": strategy or "auto",
+                "blocks": plan.page.meta.get("blocks", blocks),
+            }
+        )
         return True
 
     # --------------------------------------------------------------- helpers
@@ -440,6 +488,17 @@ class LayoutCorrector:
         elif element.rect.bottom > content.bottom:
             dy = max(-40.0, content.bottom - element.rect.bottom)
         return {"dx_mm": round(dx, 2), "dy_mm": round(dy, 2)}
+
+    def _under_filled(self, element: ElementSpec) -> bool:
+        """Whether a text frame has visibly more room than its copy needs."""
+        if not element.is_text or element.typography is None or not element.text.strip():
+            return False
+        if element.estimated_overflow > 0.001:
+            return False
+        needed = self.engine.typography.height_for(
+            element.text, element.rect.width, element.type, max(1, element.typography.columns)
+        )
+        return needed < element.rect.height * 0.82
 
     @staticmethod
     def _neighbour_of_gap(page: PageLayout, gap: Rect | None) -> ElementSpec | None:

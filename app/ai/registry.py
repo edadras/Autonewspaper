@@ -136,11 +136,13 @@ class AIService:
         )
         self.image_provider = build_image_provider(settings)
         self._degraded: set[str] = set()
+        self._closed = False
 
     # ------------------------------------------------------------ plumbing
     def reload(self) -> None:
         """Rebuild the providers after the settings changed."""
         self.close(keep_loop=True)
+        self._closed = False
         config = self.settings.settings.ai
         self.text_provider = build_text_provider(config.provider, config.model, self.settings)
         self.vision_provider = build_text_provider(
@@ -414,14 +416,23 @@ class AIService:
         }
 
     def close(self, keep_loop: bool = False) -> None:
-        """Close every provider and (optionally) the private loop."""
+        """Close every provider and (optionally) the private loop.
+
+        Safe to call more than once: the composition root closes the service
+        explicitly and the DI container closes whatever it built, so the second
+        call must be a no-op rather than an error.
+        """
+        if self._closed:
+            return
         for provider in (self.text_provider, self.vision_provider, self.image_provider):
+            coroutine = provider.close()
             try:
-                self.run(provider.close(), timeout=10)
+                self.run(coroutine, timeout=10)
             except Exception:  # pragma: no cover
-                pass
+                coroutine.close()
         if not keep_loop and self._owns_loop:
             self._loop.stop()
+            self._closed = True
 
     shutdown = close
 

@@ -28,7 +28,7 @@ from app.models.schemas import (
 )
 from app.templates.schema import TemplateSpec
 from app.vision.analyzer import PageAnalyzer, score_from_issues
-from app.vision.corrector import CorrectionResult, LayoutCorrector
+from app.vision.corrector import CorrectionAction, CorrectionResult, LayoutCorrector
 
 log = logging.getLogger(__name__)
 
@@ -264,6 +264,18 @@ class VisionQAAgent:
     ) -> CorrectionResult:
         """Choose and apply corrections for a page that failed QA."""
         actions = self.corrector.heuristic_actions(page, report.issues)
+
+        if not actions and report.score < self.threshold and page.meta.get("blocks"):
+            # Nothing is broken, the page is simply not good enough; the only
+            # lever left is recomposing it with a different strategy.
+            actions.append(
+                CorrectionAction(
+                    "rebuild_page",
+                    None,
+                    {"strategy": self.corrector._next_strategy(page)},
+                    "Score below threshold with no specific defect; try another composition",
+                )
+            )
 
         if self.ai is not None and self.engine.template.layout_rules.allowed_strategies:
             try:

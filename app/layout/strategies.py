@@ -71,6 +71,49 @@ class Region:
 Strategy = Callable[[GridSystem, Rect, list[ArticleBlock], int], list[Region]]
 
 
+def block_payload(block: ArticleBlock) -> dict[str, Any]:
+    """Serialise a block so a page can be recomposed after QA."""
+    payload = {
+        "article_id": block.article_id,
+        "headline": block.headline,
+        "subtitle": block.subtitle,
+        "kicker": block.kicker,
+        "byline": block.byline,
+        "lead": block.lead,
+        "body": block.body,
+        "quote": block.quote,
+        "weight": block.weight,
+        "area": block.area.value,
+        "priority": block.priority,
+        "column_span": block.column_span,
+        "continued": block.continued,
+        "meta": dict(block.meta),
+        "image": None,
+    }
+    if block.image is not None:
+        payload["image"] = {
+            "asset_id": block.image.asset_id,
+            "path": block.image.path,
+            "aspect": block.image.aspect,
+            "quality": block.image.quality,
+            "caption": block.image.caption,
+            "generated": block.image.generated,
+        }
+    return payload
+
+
+def block_from_payload(payload: dict[str, Any]) -> ArticleBlock:
+    """Rebuild a block from :func:`block_payload`."""
+    data = dict(payload)
+    image = data.pop("image", None)
+    area = data.pop("area", "secondary")
+    block = ArticleBlock(**data)
+    block.area = AreaKind(area) if area in {a.value for a in AreaKind} else AreaKind.SECONDARY
+    if image:
+        block.image = ImageSlot(**image)
+    return block
+
+
 def _resolve_overlap(rect: Rect, placed: Rect, gutter: float) -> Rect:
     """Shrink *rect* just enough to clear *placed*, cutting the shorter way."""
     overlap = rect.intersection(placed)

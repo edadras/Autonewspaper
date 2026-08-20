@@ -23,7 +23,13 @@ from typing import Any
 from app.layout.constraints import ConstraintChecker, ConstraintReport
 from app.layout.grid import GridSystem
 from app.layout.scoring import LayoutScore, LayoutScorer
-from app.layout.strategies import ArticleBlock, ImageSlot, Region, build_candidates
+from app.layout.strategies import (
+    ArticleBlock,
+    ImageSlot,
+    Region,
+    block_payload,
+    build_candidates,
+)
 from app.layout.typography import TypographyEngine
 from app.models.schemas import (
     AreaKind,
@@ -332,6 +338,9 @@ class LayoutEngine:
         page.elements.extend(master_elements)
         for order, region in enumerate(regions):
             page.elements.extend(self._fill_region(page, grid, region, order))
+        # Keep the source stories so QA can recompose the page with another
+        # strategy without going back to the database.
+        page.meta["blocks"] = [block_payload(region.block) for region in regions]
         return page
 
     def _fill_region(
@@ -479,9 +488,22 @@ class LayoutEngine:
 
         # --- body ----------------------------------------------------------
         if remaining >= 10.0:
-            band = Rect(x=rect.x, y=cursor, width=rect.width, height=max(0.0, rect.bottom - cursor))
+            available = max(0.0, rect.bottom - cursor)
+            element_kind = ElementType.SIDEBAR if block.area is AreaKind.SIDEBAR else ElementType.BODY
+            columns_probe = max(1, min(grid.columns_for_width(rect.width), 4))
+            needed = self.typography.height_for(
+                block.body, rect.width, element_kind, columns_probe
+            )
+            # A frame taller than its copy would hide the white space it leaves;
+            # size it to the text (plus a little slack) so QA sees the gap.
+            band = Rect(
+                x=rect.x,
+                y=cursor,
+                width=rect.width,
+                height=min(available, max(needed * 1.04, 8.0)) if needed else available,
+            )
             if band.height >= 8.0:
-                element_type = ElementType.SIDEBAR if block.area is AreaKind.SIDEBAR else ElementType.BODY
+                element_type = element_kind
                 fit = self.typography.fit(
                     block.body, band, element_type, columns=columns, allow_truncate=True
                 )
@@ -575,15 +597,25 @@ class LayoutEngine:
         return score, report
 
     def refit(self, page: PageLayout) -> PageLayout:
-        """Re-run the typography engine over every frame of *page*.
+        """Recompute the reported overflow of every frame of *page*.
 
-        Called after a correction moved or resized frames, so the reported
-        overflow always matches the current geometry.
+        Called after a correction moved, resized or re-sized a frame. Type that
+        has already been resolved (or deliberately changed by a correction) is
+        kept and only re-measured; frames that never got typography are fitted
+        from scratch.
         """
         for element in page.elements:
             if not element.is_text or not element.text:
                 continue
             columns = max(1, element.column_span)
+            if element.typography is not None:
+                overflow, _lines = self.typography.measure_overflow(
+                    element.text, element.rect, element.typography
+                )
+                element.estimated_overflow = overflow
+                minimum = self.typography.style_spec(element.type).min_size_pt
+                element.meta["used_min_size"] = element.typography.size_pt <= minimum + 0.01
+                continue
             fit = self.typography.fit(
                 element.text, element.rect, element.type, columns=columns, allow_truncate=False
             )
