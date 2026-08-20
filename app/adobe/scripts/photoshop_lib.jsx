@@ -31,6 +31,14 @@ AINS.PS = (function () {
         return doc;
     };
 
+    /* Adopt a document this code created itself (used by the design library,
+     * which builds its own canvas). */
+    api.useDocument = function (document) {
+        doc = document;
+        adopted = false;
+        return doc;
+    };
+
     api.openImage = function (path) {
         var file = new File(path);
         if (!file.exists) { throw new Error("Image not found: " + path); }

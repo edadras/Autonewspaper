@@ -369,7 +369,14 @@ def test_jsx_runtime_files_are_valid_extendscript():
 
     directory = Path(__file__).resolve().parents[2] / "app" / "adobe" / "scripts"
     files = sorted(directory.glob("*.jsx"))
-    assert len(files) == 5
+    # Every file each host loads has to be here, and every file here has to
+    # parse - counting them would only break each time one is added.
+    from app.adobe.jsx import HOST_LIBRARIES
+
+    shipped = {path.name for path in files}
+    for host, names in HOST_LIBRARIES.items():
+        missing = set(names) - shipped
+        assert not missing, f"{host} loads {missing}, which is not in the scripts directory"
     for path in files:
         source = path.read_text(encoding="utf-8")
         # #targetengine is an ExtendScript pragma, not JavaScript.

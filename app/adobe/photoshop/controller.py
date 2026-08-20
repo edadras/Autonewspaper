@@ -334,6 +334,53 @@ class PhotoshopController:
         self._run(builder.build(), "export")
         return target
 
+    # ------------------------------------------------------------- design
+    def build_design(
+        self,
+        plan: Any,
+        *,
+        export: Path | str | None = None,
+        quality: int = 92,
+        flatten: bool = True,
+    ) -> dict[str, Any]:
+        """Build a whole design in Photoshop and, optionally, export it.
+
+        One script per design rather than one per layer: a poster is fifty
+        round trips otherwise, and a half-built canvas is not a good thing to
+        leave behind if the connection drops. The result carries what
+        Photoshop actually produced - every layer with its real bounds - which
+        is what the quality check measures rather than trusting the plan.
+        """
+        from app.adobe.jsx import build_design_script
+
+        payload = plan.to_photoshop() if hasattr(plan, "to_photoshop") else dict(plan)
+        export_spec = None
+        if export is not None:
+            target = Path(export)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            export_spec = {"path": str(target), "quality": quality, "flatten": flatten}
+        script = build_design_script(payload, export=export_spec)
+        self._emit(
+            EventType.ADOBE_COMMAND,
+            host="photoshop",
+            command="build_design",
+            layers=len(payload.get("layers") or []),
+        )
+        result = self._run(script, "build_design")
+        data = dict(result.data or {})
+        data["strategy"] = result.strategy
+        failed = data.get("failed") or []
+        if failed:
+            log.warning("%d layer(s) could not be built: %s", len(failed), [f["name"] for f in failed])
+        return data
+
+    def design_report(self) -> dict[str, Any]:
+        """Measure the open design: every layer with its real bounds."""
+        builder = ScriptBuilder("photoshop", "design_report")
+        builder.raw("var __report = AINS.PSD.designReport();")
+        builder.emit("__report")
+        return dict(self._run(builder.build(), "design_report").data or {})
+
     def close_document(self, save: bool = False) -> bool:
         """Close the open document."""
         builder = ScriptBuilder("photoshop", "close_document")

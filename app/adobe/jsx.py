@@ -24,7 +24,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent / "scripts"
 
 HOST_LIBRARIES = {
     "indesign": ["json2.jsx", "ains_core.jsx", "indesign_lib.jsx"],
-    "photoshop": ["json2.jsx", "ains_core.jsx", "photoshop_lib.jsx"],
+    "photoshop": ["json2.jsx", "ains_core.jsx", "photoshop_lib.jsx", "photoshop_design.jsx"],
 }
 
 
@@ -357,6 +357,31 @@ def build_photoshop_script(
     builder.raw("__result.capabilities = AINS.PS.capabilities();")
     builder.emit("__result")
     return builder.build(result_path)
+
+
+def build_design_script(
+    plan: dict[str, Any],
+    *,
+    result_path: Path | None = None,
+    export: dict[str, Any] | None = None,
+) -> Script:
+    """Generate the script that builds a whole design in Photoshop.
+
+    One script per design rather than one per layer: a poster is fifty round
+    trips otherwise, and a half-built canvas is not something to leave behind
+    if the connection drops.
+    """
+    builder = ScriptBuilder("photoshop", name="build_design")
+    builder.call("setup")
+    builder.raw("AINS.PSD.reset();")
+    builder.var("__plan", plan)
+    builder.raw("var __result = AINS.PSD.buildDesign(__plan);")
+    builder.raw("__result.report = AINS.PSD.designReport();")
+    if export:
+        builder.var("__export", export)
+        builder.raw("__result.exported = AINS.PSD.exportTo(__export);")
+    builder.emit("__result")
+    return builder.build(result_path, layers=len(plan.get("layers") or []))
 
 
 def build_probe_script(host: str, result_path: Path | None = None) -> Script:
