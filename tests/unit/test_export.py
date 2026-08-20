@@ -133,3 +133,51 @@ def test_the_builtin_renderer_writes_a_pdf_page_per_layout_page(template, articl
     assert len(PdfReader(str(target)).pages) == len(plan.pages)
     # The rasters go to a scratch directory of their own, not next to the PDF.
     assert [item.name for item in tmp_path.iterdir()] == ["fallback.pdf"]
+
+
+def test_two_exports_at_once_do_not_interleave(tmp_path):
+    """The service is shared; the UI can start an export while one is running.
+
+    Per-run state used to live on the instance, so a second export could read
+    the first one's rendered pages. The lock is what stops that, and this
+    pins it.
+    """
+    import threading
+    import time
+
+    from app.export.exporter import ExportService
+
+    service = ExportService()
+    order: list[str] = []
+    entered = threading.Event()
+
+    def slow_export(name: str) -> None:
+        with service._lock:
+            order.append(f"{name}-in")
+            entered.set()
+            time.sleep(0.15)
+            order.append(f"{name}-out")
+
+    first = threading.Thread(target=slow_export, args=("a",))
+    second = threading.Thread(target=slow_export, args=("b",))
+    first.start()
+    entered.wait(2)
+    second.start()
+    first.join(5)
+    second.join(5)
+
+    # Whichever ran first, it finished before the other started.
+    assert order in (["a-in", "a-out", "b-in", "b-out"], ["b-in", "b-out", "a-in", "a-out"])
+
+
+def test_the_export_service_keeps_no_per_run_state(tmp_path):
+    """Nothing an export produces may be stashed on the shared instance."""
+    from app.export.exporter import ExportService
+
+    service = ExportService()
+    stateful = [
+        name
+        for name, value in vars(service).items()
+        if isinstance(value, list | dict) and not name.startswith("_")
+    ]
+    assert stateful == [], f"per-run state on a shared service: {stateful}"

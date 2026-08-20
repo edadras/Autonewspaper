@@ -42,11 +42,16 @@ AINS.ID = (function () {
         return doc;
     };
 
-    api.useDocument = function (document) { doc = document; return doc; };
+    api.useDocument = function (document) { registry = {}; doc = document; return doc; };
 
     /* ----------------------------------------------------------- document */
 
     api.createDocument = function (spec) {
+        /* The queue runner keeps its engine alive between jobs, so the frame
+         * registry would otherwise carry references into the previous
+         * document - and every lookup would find an item that no longer
+         * belongs to the document being built. */
+        registry = {};
         var document = app.documents.add(false);
         var prefs = document.documentPreferences;
         prefs.pageWidth = spec.page_width_mm;
@@ -73,6 +78,7 @@ AINS.ID = (function () {
     };
 
     api.openTemplate = function (path, asCopy) {
+        registry = {};
         var file = new File(path);
         if (!file.exists) { throw new Error("Template not found: " + path); }
         doc = app.open(file, false, (asCopy === false) ? OpenOptions.OPEN_ORIGINAL : OpenOptions.OPEN_COPY);
@@ -83,6 +89,7 @@ AINS.ID = (function () {
     };
 
     api.openDocument = function (path) {
+        registry = {};
         var file = new File(path);
         if (!file.exists) { throw new Error("Document not found: " + path); }
         doc = app.open(file, false);

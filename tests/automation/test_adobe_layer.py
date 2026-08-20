@@ -377,3 +377,19 @@ def test_jsx_runtime_files_are_valid_extendscript():
             line for line in source.splitlines() if not line.startswith(("#target", "#include"))
         )
         esprima.parseScript(source)
+
+
+def test_the_frame_registry_is_reset_whenever_the_document_changes():
+    """The queue runner keeps one engine alive across jobs.
+
+    A registry carried over from the previous document would hand back page
+    items that belong to a document InDesign has already closed, so every
+    entry point that changes the current document has to clear it.
+    """
+    from app.adobe.jsx import SCRIPTS_DIR
+
+    source = (SCRIPTS_DIR / "indesign_lib.jsx").read_text(encoding="utf-8")
+    for entry in ("createDocument", "openTemplate", "openDocument", "useDocument", "closeDocument"):
+        start = source.index(f"api.{entry} = function")
+        body = source[start : start + 700]
+        assert "registry = {}" in body, f"api.{entry} does not clear the frame registry"
