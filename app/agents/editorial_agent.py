@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.ai.registry import AIService
-from app.models import entities as E  # noqa: N812
 from app.models.schemas import EditorialPlan
 from app.services.project_manager import ProjectHandle
 from app.utils import text as T

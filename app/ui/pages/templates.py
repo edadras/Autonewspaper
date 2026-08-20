@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QSplitter,
-    QWidget,
 )
 
 from app.ui.pages.base import Page
@@ -49,9 +48,7 @@ class TemplatesPage(Page):
         self.root.addWidget(toolbar)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.table = DataTable(
-            ["Name", "Id", "Product", "Language", "Page", "Columns", "Styles", "Built-in"]
-        )
+        self.table = DataTable(["Name", "Id", "Product", "Language", "Page", "Columns", "Styles", "Built-in"])
         self.table.itemSelectionChanged.connect(self._show_selected)
         splitter.addWidget(self.table)
         self.detail = QPlainTextEdit()
@@ -71,8 +68,14 @@ class TemplatesPage(Page):
         self.table.fill(
             [
                 [
-                    s["name"], s["id"], s["product_type"], s["language"],
-                    s["page"], s["columns"], s["styles"], "yes" if s["builtin"] else "",
+                    s["name"],
+                    s["id"],
+                    s["product_type"],
+                    s["language"],
+                    s["page"],
+                    s["columns"],
+                    s["styles"],
+                    "yes" if s["builtin"] else "",
                 ]
                 for s in summaries
             ],

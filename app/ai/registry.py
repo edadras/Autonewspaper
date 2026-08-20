@@ -26,10 +26,10 @@ from app.ai.local_provider import LocalProvider
 from app.ai.openai_provider import OpenAIProvider
 from app.ai.prompts import PromptLibrary
 from app.config.settings import SettingsManager
-from app.core.errors import AIProviderError, AppError
+from app.core.errors import AppError
 from app.models.schemas import (
-    ArticleAnalysis,
     AreaKind,
+    ArticleAnalysis,
     EditorialPlan,
     GeneratedImage,
     ImageRequest,
@@ -145,15 +145,17 @@ class AIService:
         self._closed = False
         config = self.settings.settings.ai
         self.text_provider = build_text_provider(config.provider, config.model, self.settings)
-        self.vision_provider = build_text_provider(
-            config.vision_provider, config.vision_model, self.settings
-        )
+        self.vision_provider = build_text_provider(config.vision_provider, config.vision_model, self.settings)
         self.image_provider = build_image_provider(self.settings)
         self._degraded.clear()
         log.info(
             "AI providers reloaded: text=%s/%s vision=%s/%s images=%s/%s",
-            config.provider, config.model, config.vision_provider, config.vision_model,
-            self.settings.settings.image_ai.provider, self.settings.settings.image_ai.model,
+            config.provider,
+            config.model,
+            config.vision_provider,
+            config.vision_model,
+            self.settings.settings.image_ai.provider,
+            self.settings.settings.image_ai.model,
         )
 
     def run(self, coro: Coroutine[Any, Any, T], timeout: float | None = None) -> T:
@@ -173,7 +175,9 @@ class AIService:
             self._degraded.add(provider.name)
             log.error(
                 "AI provider '%s' failed during %s (%s); continuing with the offline analyser",
-                provider.name, purpose, exc,
+                provider.name,
+                purpose,
+                exc,
             )
             return self.run(self._offline.generate_text(request))
 
@@ -233,7 +237,9 @@ class AIService:
                         visual_importance=_clamp(item.get("visual_importance", 50)),
                         category=str(item.get("category", "general")),
                         recommended_page=max(1, min(page_count, int(item.get("recommended_page", 1) or 1))),
-                        recommended_area=AreaKind(area) if area in {a.value for a in AreaKind} else AreaKind.SECONDARY,
+                        recommended_area=AreaKind(area)
+                        if area in {a.value for a in AreaKind}
+                        else AreaKind.SECONDARY,
                         headline=str(item.get("headline", "")),
                         subtitle=str(item.get("subtitle", "")),
                         lead=str(item.get("lead", "")),

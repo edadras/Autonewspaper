@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QSpinBox,
-    QWidget,
 )
 
 from app.models.schemas import ProjectSpec
@@ -51,9 +50,7 @@ class ProjectsPage(Page):
         self.delete_button.clicked.connect(self._delete)
         self.root.addWidget(toolbar)
 
-        self.table = DataTable(
-            ["Name", "Publication", "Edition", "Pages", "Template", "Status", "Folder"]
-        )
+        self.table = DataTable(["Name", "Publication", "Edition", "Pages", "Template", "Status", "Folder"])
         self.table.doubleClicked.connect(self._open_selected)
         self.root.addWidget(self.table, 1)
 

@@ -100,15 +100,11 @@ class ExportPage(Page):
         )
         for path in files[:200]:
             size = path.stat().st_size
-            item = QListWidgetItem(
-                f"{path.relative_to(handle.output_dir)}   ({size / 1024:.0f} KB)"
-            )
+            item = QListWidgetItem(f"{path.relative_to(handle.output_dir)}   ({size / 1024:.0f} KB)")
             item.setData(1000, str(path))
             self.output_list.addItem(item)
         self.status.setText(
-            f"{len(files)} file(s) in {handle.output_dir}"
-            if files
-            else "Nothing exported yet."
+            f"{len(files)} file(s) in {handle.output_dir}" if files else "Nothing exported yet."
         )
 
     # -------------------------------------------------------------- actions
@@ -154,9 +150,7 @@ class ExportPage(Page):
         if handle is None:
             return
         if not self.app.adobe.indesign_app.installed:
-            show_error(
-                self, "Package", "Packaging collects links and fonts and requires InDesign."
-            )
+            show_error(self, "Package", "Packaging collects links and fonts and requires InDesign.")
             return
 
         def action() -> None:

@@ -198,7 +198,9 @@ class VisionQAAgent:
             except ValueError:
                 continue
             severity_value = str(item.get("severity", "medium")).lower()
-            severity = Severity(severity_value) if severity_value in {s.value for s in Severity} else Severity.MEDIUM
+            severity = (
+                Severity(severity_value) if severity_value in {s.value for s in Severity} else Severity.MEDIUM
+            )
             element_id = str(item.get("element_id") or "") or None
             if element_id and page.element(element_id) is None:
                 element_id = None
@@ -297,9 +299,7 @@ class VisionQAAgent:
             except Exception as exc:  # noqa: BLE001
                 log.warning("AI correction planning failed on page %d: %s", page.index, exc)
 
-        return self.corrector.apply(
-            page, actions, asset_quality=asset_quality, asset_pixels=asset_pixels
-        )
+        return self.corrector.apply(page, actions, asset_quality=asset_quality, asset_pixels=asset_pixels)
 
     # ------------------------------------------------------------------ loop
     def run_loop(
@@ -348,7 +348,9 @@ class VisionQAAgent:
                     on_iteration(record)
                 log.info(
                     "Page %d passed QA on iteration %d with score %.1f",
-                    page.index, iteration, report.score,
+                    page.index,
+                    iteration,
+                    report.score,
                 )
                 page.qa_score = report.score
                 page.iterations = iteration
@@ -375,7 +377,8 @@ class VisionQAAgent:
             if not correction.applied:
                 log.info(
                     "Page %d: no correction improved the score (%.1f); keeping the best result",
-                    page.index, report.score,
+                    page.index,
+                    report.score,
                 )
                 break
 
@@ -383,7 +386,10 @@ class VisionQAAgent:
         log.warning(
             "Page %d did not reach the QA threshold (%.1f < %.1f) after %d iteration(s); "
             "keeping the best result",
-            page.index, best_report.score, self.threshold, len(records),
+            page.index,
+            best_report.score,
+            self.threshold,
+            len(records),
         )
         best_page.qa_score = best_report.score
         best_page.iterations = len(records)

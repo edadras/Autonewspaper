@@ -137,14 +137,18 @@ class LayoutCorrector:
             elif issue.type is IssueType.OVERLAP and element is not None:
                 actions.append(
                     CorrectionAction(
-                        "shrink_element", element.id, {"factor": 0.92},
+                        "shrink_element",
+                        element.id,
+                        {"factor": 0.92},
                         "Shrink the frame to clear the overlap",
                     )
                 )
             elif issue.type in (IssueType.MARGIN_VIOLATION, IssueType.OUT_OF_BOUNDS) and element:
                 actions.append(
                     CorrectionAction(
-                        "move_element", element.id, self._pull_inside(page, element),
+                        "move_element",
+                        element.id,
+                        self._pull_inside(page, element),
                         "Move the frame back into the live area",
                     )
                 )
@@ -157,21 +161,27 @@ class LayoutCorrector:
                         # making an already page-wide frame bigger.
                         actions.append(
                             CorrectionAction(
-                                "increase_font", target.id, {"delta_pt": 1.0},
+                                "increase_font",
+                                target.id,
+                                {"delta_pt": 1.0},
                                 "Set the story larger so it fills its frame",
                             )
                         )
                     else:
                         actions.append(
                             CorrectionAction(
-                                "grow_element", target.id, {"factor": 1.12},
+                                "grow_element",
+                                target.id,
+                                {"factor": 1.12},
                                 "Grow the neighbouring story into the empty block",
                             )
                         )
             elif issue.type is IssueType.SMALL_FONT and element is not None:
                 actions.append(
                     CorrectionAction(
-                        "grow_element", element.id, {"factor": 1.08},
+                        "grow_element",
+                        element.id,
+                        {"factor": 1.08},
                         "Give the frame room so the type can grow back",
                     )
                 )
@@ -180,7 +190,9 @@ class LayoutCorrector:
                 if runner_up is not None:
                     actions.append(
                         CorrectionAction(
-                            "reduce_font", runner_up.id, {"delta_pt": 1.5},
+                            "reduce_font",
+                            runner_up.id,
+                            {"delta_pt": 1.5},
                             "Hold the second headline below the lead to restore the hierarchy",
                         )
                     )
@@ -188,20 +200,22 @@ class LayoutCorrector:
                 if lead is not None:
                     actions.append(
                         CorrectionAction(
-                            "grow_element", lead.id, {"factor": 1.06},
+                            "grow_element",
+                            lead.id,
+                            {"factor": 1.06},
                             "Strengthen the lead headline to restore the hierarchy",
                         )
                     )
             elif issue.type is IssueType.EMPTY_FRAME and element is not None:
-                actions.append(
-                    CorrectionAction("drop_element", element.id, {}, "Remove the empty frame")
-                )
+                actions.append(CorrectionAction("drop_element", element.id, {}, "Remove the empty frame"))
 
         critical = [i for i in issues if i.severity is Severity.CRITICAL]
         if len(critical) >= 3:
             actions.append(
                 CorrectionAction(
-                    "rebuild_page", None, {"strategy": self._next_strategy(page)},
+                    "rebuild_page",
+                    None,
+                    {"strategy": self._next_strategy(page)},
                     "Too many hard failures; recompose the page with another strategy",
                 )
             )
@@ -261,9 +275,7 @@ class LayoutCorrector:
                 result.rejected.append((action, "no effect"))
 
         self.engine.refit(page)
-        score, _report = self.engine.rescore(
-            page, asset_quality=asset_quality, asset_pixels=asset_pixels
-        )
+        score, _report = self.engine.rescore(page, asset_quality=asset_quality, asset_pixels=asset_pixels)
         result.score_after = score.total
 
         # Only a regression is rolled back. A correction that leaves the
@@ -273,7 +285,9 @@ class LayoutCorrector:
         if result.applied and result.regressed:
             log.info(
                 "Correction pass on page %d made the score worse (%.1f -> %.1f); rolling back",
-                page.index, result.score_before, result.score_after,
+                page.index,
+                result.score_before,
+                result.score_after,
             )
             page.elements = snapshot.elements
             page.score = snapshot.score
@@ -333,16 +347,12 @@ class LayoutCorrector:
                         return f"the change would overlap '{other.frame_name}'"
         return None
 
-    def _preview(
-        self, page: PageLayout, element: ElementSpec, action: CorrectionAction
-    ) -> Rect | None:
+    def _preview(self, page: PageLayout, element: ElementSpec, action: CorrectionAction) -> Rect | None:
         """Geometry the action would produce, for validation."""
         rect = element.rect
         if action.action == "grow_element":
             factor = float(action.args["factor"])
-            return Rect(
-                x=rect.x, y=rect.y, width=rect.width * factor, height=rect.height * factor
-            )
+            return Rect(x=rect.x, y=rect.y, width=rect.width * factor, height=rect.height * factor)
         if action.action == "move_element":
             return Rect(
                 x=rect.x + float(action.args["dx_mm"]),
@@ -360,16 +370,20 @@ class LayoutCorrector:
         if action.action == "shrink_element" and element:
             factor = float(action.args["factor"])
             element.rect = Rect(
-                x=element.rect.x, y=element.rect.y,
-                width=element.rect.width * factor, height=element.rect.height * factor,
+                x=element.rect.x,
+                y=element.rect.y,
+                width=element.rect.width * factor,
+                height=element.rect.height * factor,
             )
             return True
 
         if action.action == "grow_element" and element:
             factor = float(action.args["factor"])
             element.rect = Rect(
-                x=element.rect.x, y=element.rect.y,
-                width=element.rect.width * factor, height=element.rect.height * factor,
+                x=element.rect.x,
+                y=element.rect.y,
+                width=element.rect.width * factor,
+                height=element.rect.height * factor,
             )
             return True
 
@@ -377,7 +391,8 @@ class LayoutCorrector:
             element.rect = Rect(
                 x=element.rect.x + float(action.args["dx_mm"]),
                 y=element.rect.y + float(action.args["dy_mm"]),
-                width=element.rect.width, height=element.rect.height,
+                width=element.rect.width,
+                height=element.rect.height,
             )
             return True
 
@@ -531,10 +546,7 @@ class LayoutCorrector:
     def _second_headline(page: PageLayout) -> ElementSpec | None:
         """The second-largest headline, the one that flattens the hierarchy."""
         headlines = sorted(
-            (
-                e for e in page.elements
-                if e.type is ElementType.HEADLINE and e.typography and not e.locked
-            ),
+            (e for e in page.elements if e.type is ElementType.HEADLINE and e.typography and not e.locked),
             key=lambda e: -e.typography.size_pt,  # type: ignore[union-attr]
         )
         return headlines[1] if len(headlines) > 1 else None

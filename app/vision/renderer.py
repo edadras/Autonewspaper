@@ -27,16 +27,14 @@ from pathlib import Path
 from typing import Any
 
 from PIL import Image, ImageDraw
+from PIL import features as _pil_features
 
-from app.models.schemas import ElementSpec, ElementType, LayoutPlan, PageLayout, Rect
+from app.models.schemas import ElementSpec, ElementType, LayoutPlan, PageLayout
 from app.templates.schema import TemplateSpec
-from app.utils import text as T
 from app.utils.units import mm_to_px
 from app.vision.fonts import load_font
 
 log = logging.getLogger(__name__)
-
-from PIL import features as _pil_features
 
 try:  # pragma: no cover - optional
     import arabic_reshaper  # type: ignore
@@ -244,9 +242,7 @@ class PreviewRenderer:
         columns = max(1, typography.columns if typography else 1)
         gutter = typography.column_gutter_mm if typography else page.gutter_mm
         column_width = (rect.width - gutter * (columns - 1)) / columns
-        leading_px = self.px(
-            (typography.leading_pt if typography else 12.0) * 25.4 / 72.0
-        )
+        leading_px = self.px((typography.leading_pt if typography else 12.0) * 25.4 / 72.0)
         alignment = typography.alignment if typography else "left"
         direction = typography.direction if typography else self.direction
 
@@ -274,9 +270,7 @@ class PreviewRenderer:
                 x = self.px(column_x)
             draw.text((x, y), drawn, font=font, fill=color, **_text_kwargs(direction))
 
-    def _measure(
-        self, text: str, font: Any, draw: ImageDraw.ImageDraw, direction: str | None = None
-    ) -> int:
+    def _measure(self, text: str, font: Any, draw: ImageDraw.ImageDraw, direction: str | None = None) -> int:
         try:
             box = draw.textbbox((0, 0), text, font=font, **_text_kwargs(direction or self.direction))
             return int(box[2] - box[0])
@@ -305,15 +299,15 @@ class PreviewRenderer:
         return lines
 
     # ------------------------------------------------------------- edition
-    def render_plan(self, plan: LayoutPlan, directory: Path | str, prefix: str = "page") -> list[RenderResult]:
+    def render_plan(
+        self, plan: LayoutPlan, directory: Path | str, prefix: str = "page"
+    ) -> list[RenderResult]:
         """Render every page of a plan into *directory*."""
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
         results = []
         for page in plan.pages:
-            results.append(
-                self.render_page(page, directory / f"{prefix}_{page.index:03d}.png")
-            )
+            results.append(self.render_page(page, directory / f"{prefix}_{page.index:03d}.png"))
         return results
 
     def render_pdf(self, plan: LayoutPlan, target: Path | str, dpi: int | None = None) -> Path:

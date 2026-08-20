@@ -163,10 +163,35 @@ class LayoutRules(BaseModel):
     )
     slots: list[SlotSpec] = Field(
         default_factory=lambda: [
-            SlotSpec(area="main", min_height_ratio=0.30, max_height_ratio=0.62, min_columns=3, image_probability=0.95),
-            SlotSpec(area="secondary", min_height_ratio=0.18, max_height_ratio=0.38, min_columns=2, image_probability=0.6),
-            SlotSpec(area="small", min_height_ratio=0.10, max_height_ratio=0.24, min_columns=1, image_probability=0.25),
-            SlotSpec(area="sidebar", min_height_ratio=0.10, max_height_ratio=0.55, min_columns=1, max_columns=2, image_probability=0.15),
+            SlotSpec(
+                area="main",
+                min_height_ratio=0.30,
+                max_height_ratio=0.62,
+                min_columns=3,
+                image_probability=0.95,
+            ),
+            SlotSpec(
+                area="secondary",
+                min_height_ratio=0.18,
+                max_height_ratio=0.38,
+                min_columns=2,
+                image_probability=0.6,
+            ),
+            SlotSpec(
+                area="small",
+                min_height_ratio=0.10,
+                max_height_ratio=0.24,
+                min_columns=1,
+                image_probability=0.25,
+            ),
+            SlotSpec(
+                area="sidebar",
+                min_height_ratio=0.10,
+                max_height_ratio=0.55,
+                min_columns=1,
+                max_columns=2,
+                image_probability=0.15,
+            ),
         ]
     )
     keep_masthead_on_first_page: bool = True
@@ -198,9 +223,9 @@ class TemplateSpec(BaseModel):
     id: str
     name: str
     description: str = ""
-    product_type: Literal[
-        "newspaper", "magazine", "brochure", "catalog", "flyer", "poster", "digital"
-    ] = "newspaper"
+    product_type: Literal["newspaper", "magazine", "brochure", "catalog", "flyer", "poster", "digital"] = (
+        "newspaper"
+    )
     language: Literal["fa", "en", "ar", "tr"] = "fa"
     direction: Literal["rtl", "ltr"] = "rtl"
     author: str = ""

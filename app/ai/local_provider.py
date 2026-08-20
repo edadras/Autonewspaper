@@ -98,9 +98,7 @@ class LocalProvider(AIProvider):
     async def analyze_image(self, request: VisionRequest) -> AIResponse:
         """Send images to a local vision model."""
         started = time.monotonic()
-        images = [
-            base64.b64encode(Path(path).read_bytes()).decode("ascii") for path in request.image_paths
-        ]
+        images = [base64.b64encode(Path(path).read_bytes()).decode("ascii") for path in request.image_paths]
         if self.api_style == "openai":
             from app.ai.openai_provider import encode_data_url
 

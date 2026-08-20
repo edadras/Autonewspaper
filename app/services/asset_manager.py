@@ -9,9 +9,10 @@ best picture for each story.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from app.adobe.photoshop.controller import PhotoshopController
 from app.ai.registry import AIService
@@ -106,7 +107,11 @@ class AssetManager:
             try:
                 destination = copy_into(file, handle.images_dir, rename=safe_filename(file.name))
                 asset_id = self._register(
-                    handle, destination, digest, asset_type=asset_type, article_id=article_id,
+                    handle,
+                    destination,
+                    digest,
+                    asset_type=asset_type,
+                    article_id=article_id,
                     source="import",
                 )
             except Exception as exc:  # noqa: BLE001
@@ -261,7 +266,8 @@ class AssetManager:
         """Pick the best usable picture already linked to a story."""
         with handle.uow() as uow:
             candidates = [
-                a for a in uow.assets.for_article(article_id)
+                a
+                for a in uow.assets.for_article(article_id)
                 if a.duplicate_of is None and a.quality_score >= min_quality
             ]
             if not candidates:
@@ -277,12 +283,9 @@ class AssetManager:
         assigned = 0
         with handle.uow() as uow:
             articles = [
-                a for a in uow.articles.by_priority(handle.project_id)
-                if a.image_required or a.priority >= 65
+                a for a in uow.articles.by_priority(handle.project_id) if a.image_required or a.priority >= 65
             ]
-            pool = [
-                a for a in uow.assets.unassigned(handle.project_id) if a.duplicate_of is None
-            ]
+            pool = [a for a in uow.assets.unassigned(handle.project_id) if a.duplicate_of is None]
             pool.sort(key=lambda a: -a.quality_score)
             for article in articles:
                 if not pool:
@@ -324,10 +327,7 @@ class AssetManager:
             aspect_ratio=aspect_ratio,
             width_px=width,
             height_px=height,
-            negative_prompt=str(
-                prompt_payload.get("negative_prompt")
-                or "no text, no watermark, no logo"
-            ),
+            negative_prompt=str(prompt_payload.get("negative_prompt") or "no text, no watermark, no logo"),
             language=language,
             article_id=article_id,
         )
@@ -363,7 +363,9 @@ class AssetManager:
                 row.set_meta(meta)
         self._emit(
             EventType.ASSET_GENERATED,
-            slug=handle.slug, article_id=article_id, asset_id=asset_id,
+            slug=handle.slug,
+            article_id=article_id,
+            asset_id=asset_id,
             provider=generated.provider,
         )
         log.info("Generated image for article %s via %s", article_id, generated.provider)
@@ -434,7 +436,9 @@ class AssetManager:
             if row is None:
                 raise AssetError(f"Asset {asset_id} does not exist")
             source = Path(row.path)
-            filename = safe_filename(f"{Path(row.filename).stem}_p{int(frame_width_mm)}x{int(frame_height_mm)}.jpg")
+            filename = safe_filename(
+                f"{Path(row.filename).stem}_p{int(frame_width_mm)}x{int(frame_height_mm)}.jpg"
+            )
 
         if not source.exists():
             raise AssetError(f"The file for asset {asset_id} is missing: {source}")
@@ -469,7 +473,10 @@ class AssetManager:
                 row.set_meta(meta)
         log.info(
             "Processed asset %s for a %.0fx%.0f mm frame with the %s engine",
-            asset_id, frame_width_mm, frame_height_mm, result.get("engine"),
+            asset_id,
+            frame_width_mm,
+            frame_height_mm,
+            result.get("engine"),
         )
         return result
 
@@ -511,12 +518,10 @@ class AssetManager:
                 "processed": sum(1 for a in assets if a.processed),
                 "duplicates": sum(1 for a in assets if a.duplicate_of is not None),
                 "assigned": sum(1 for a in assets if a.article_id is not None),
-                "average_quality": round(
-                    sum(a.quality_score for a in assets) / len(assets), 1
-                ) if assets else 0.0,
-                "low_quality": [
-                    a.filename for a in assets if self._is_weak(a)
-                ][:10],
+                "average_quality": round(sum(a.quality_score for a in assets) / len(assets), 1)
+                if assets
+                else 0.0,
+                "low_quality": [a.filename for a in assets if self._is_weak(a)][:10],
             }
 
     @staticmethod

@@ -42,8 +42,8 @@ class ImageGenerationProvider(abc.ABC):
     async def health_check(self) -> ProviderHealth:
         """Verify the back-end is reachable."""
 
-    async def close(self) -> None:
-        """Release network resources."""
+    async def close(self) -> None:  # noqa: B027 - optional hook, see AIProvider.close
+        """Release network resources, if the back-end holds any."""
 
     @staticmethod
     def _finalize(target: Path, generated: GeneratedImage) -> GeneratedImage:
@@ -288,7 +288,9 @@ class LocalImageProvider(ImageGenerationProvider):
     ) -> None:
         super().__init__(model, **options)
         self._delegate = OpenAIImageProvider(
-            model, api_key=api_key or "local", base_url=base_url or "http://localhost:8080/v1",
+            model,
+            api_key=api_key or "local",
+            base_url=base_url or "http://localhost:8080/v1",
             timeout=timeout,
         )
         self._delegate.name = self.name

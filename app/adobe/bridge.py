@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import shutil
 import subprocess
 import sys
@@ -270,7 +269,7 @@ class ScriptFileStrategy(ComStrategy):
         client = self._dispatch()
         path = self.work_dir / f"{script.name}_{uuid.uuid4().hex[:8]}.jsx"
         script.save(path)
-        loader = f'var __f = new File({json.dumps(str(path))}); $.evalFile(__f);'
+        loader = f"var __f = new File({json.dumps(str(path))}); $.evalFile(__f);"
         try:
             if self.app.kind == "indesign":
                 payload = client.DoScript(loader, SCRIPT_LANGUAGE_JAVASCRIPT)
@@ -507,7 +506,11 @@ class AdobeBridge:
                     errors.append(f"{strategy.name}: {exc}")
                     log.warning(
                         "Strategy '%s' failed for %s (attempt %d/%d): %s",
-                        strategy.name, operation, attempt + 1, retries + 1, exc,
+                        strategy.name,
+                        operation,
+                        attempt + 1,
+                        retries + 1,
+                        exc,
                     )
                     continue
                 if result.ok:

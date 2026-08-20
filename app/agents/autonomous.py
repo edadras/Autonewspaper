@@ -19,10 +19,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.agents.tools import ToolRegistry, ToolResult
 from app.ai.base import ChatMessage, TextRequest
 from app.ai.registry import AIService
-from app.agents.tools import ToolRegistry, ToolResult
-from app.core.errors import AppError, Component
+from app.core.errors import AppError
 from app.core.jobs import CancelToken
 
 log = logging.getLogger(__name__)
@@ -191,10 +191,18 @@ class AutonomousAgent:
             if on_step:
                 on_step(step)
 
-            transcript.append(ChatMessage("assistant", json.dumps({
-                "thought": step.thought, "tool": step.tool, "arguments": step.arguments
-            }, ensure_ascii=False)))
-            transcript.append(ChatMessage("user", json.dumps(step.result.to_dict(), ensure_ascii=False, default=str)))
+            transcript.append(
+                ChatMessage(
+                    "assistant",
+                    json.dumps(
+                        {"thought": step.thought, "tool": step.tool, "arguments": step.arguments},
+                        ensure_ascii=False,
+                    ),
+                )
+            )
+            transcript.append(
+                ChatMessage("user", json.dumps(step.result.to_dict(), ensure_ascii=False, default=str))
+            )
 
             if step.result.ok:
                 consecutive_failures = 0
@@ -212,7 +220,10 @@ class AutonomousAgent:
             run.stop_reason = "iteration limit reached"
         log.info(
             "Agent finished '%s': %s after %d call(s) in %.1fs",
-            goal, run.stop_reason, run.tool_calls, run.duration,
+            goal,
+            run.stop_reason,
+            run.tool_calls,
+            run.duration,
         )
         return run
 
@@ -222,9 +233,7 @@ class AutonomousAgent:
         return bool(tool and tool.capability.endswith(".read"))
 
     # -------------------------------------------------------------- steps
-    def _next_step(
-        self, index: int, transcript: list[ChatMessage], run: AgentRun
-    ) -> AgentStep | None:
+    def _next_step(self, index: int, transcript: list[ChatMessage], run: AgentRun) -> AgentStep | None:
         """Ask the model for the next action, or fall back to the planner."""
         request = TextRequest(
             messages=list(transcript),
@@ -297,8 +306,10 @@ def qa_fallback_planner(page_index: int) -> Callable[[list[AgentStep]], AgentSte
         analysed = [s for s in steps if s.tool == "analyze_page" and s.result and s.result.ok]
         if not analysed:
             return AgentStep(
-                index=0, thought="Inspect the page before changing anything",
-                tool="analyze_page", arguments={"page": page_index},
+                index=0,
+                thought="Inspect the page before changing anything",
+                tool="analyze_page",
+                arguments={"page": page_index},
             )
         data = analysed[-1].result.data or {}  # type: ignore[union-attr]
         if data.get("passed"):
@@ -366,17 +377,17 @@ def qa_fallback_planner(page_index: int) -> Callable[[list[AgentStep]], AgentSte
         # Nothing actionable is left. Re-inspect only if something was actually
         # changed since the last inspection; otherwise another analyze_page
         # would return the same report and the loop would spin.
-        last_analysis_at = max(
-            (i for i, s in enumerate(steps) if s.tool == "analyze_page"), default=-1
-        )
+        last_analysis_at = max((i for i, s in enumerate(steps) if s.tool == "analyze_page"), default=-1)
         changed_since = any(
             s.tool != "analyze_page" and s.result is not None and s.result.ok
             for s in steps[last_analysis_at + 1 :]
         )
         if changed_since:
             return AgentStep(
-                index=0, thought="Re-inspect the page after the corrections",
-                tool="analyze_page", arguments={"page": page_index},
+                index=0,
+                thought="Re-inspect the page after the corrections",
+                tool="analyze_page",
+                arguments={"page": page_index},
             )
         return AgentStep(
             index=0,

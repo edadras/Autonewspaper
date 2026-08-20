@@ -9,7 +9,7 @@ and sent to a model as JSON.
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Literal
@@ -374,7 +374,7 @@ class LayoutPlan(BaseModel):
     template_id: str = ""
     design_style: str = "classic"
     language: str = "fa"
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     pages: list[PageLayout] = Field(default_factory=list)
     score: float = 0.0
     iteration: int = 0
@@ -448,7 +448,7 @@ class EditorialPlan(BaseModel):
     notes: list[str] = Field(default_factory=list)
     provider: str = ""
     model: str = ""
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     def analysis_for(self, article_id: int) -> ArticleAnalysis | None:
         """Look up the analysis of one article."""
@@ -572,7 +572,7 @@ class GeneratedImage(BaseModel):
     prompt: str
     width: int
     height: int
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     seed: int | None = None
     revised_prompt: str = ""
 
@@ -660,9 +660,9 @@ class ProjectSpec(BaseModel):
     publication_name: str = ""
     edition_date: date = Field(default_factory=date.today)
     language: Literal["fa", "en", "ar", "tr"] = "fa"
-    product_type: Literal[
-        "newspaper", "magazine", "brochure", "catalog", "flyer", "poster", "digital"
-    ] = "newspaper"
+    product_type: Literal["newspaper", "magazine", "brochure", "catalog", "flyer", "poster", "digital"] = (
+        "newspaper"
+    )
     page_size: str = "Broadsheet"
     page_width_mm: float = 297.0
     page_height_mm: float = 420.0

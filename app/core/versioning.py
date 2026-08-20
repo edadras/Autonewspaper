@@ -14,7 +14,7 @@ import logging
 import re
 import shutil
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -83,7 +83,7 @@ class VersionManager:
                     created_at=(
                         datetime.fromisoformat(created)
                         if created
-                        else datetime.fromtimestamp(entry.stat().st_mtime, tz=timezone.utc)
+                        else datetime.fromtimestamp(entry.stat().st_mtime, tz=UTC)
                     ),
                     label=meta.get("label", entry.name),
                     note=meta.get("note", ""),
@@ -118,7 +118,7 @@ class VersionManager:
             number=number,
             name=target.name,
             path=target,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             label=label,
             note=note,
         )

@@ -66,8 +66,7 @@ def test_every_import_format_produces_articles(application, tmp_path, suffix):
         expected = 1
     else:
         path.write_text(
-            "<html><body><article><h1>HTML headline</h1><p>First.</p><p>Second.</p>"
-            "</article></body></html>",
+            "<html><body><article><h1>HTML headline</h1><p>First.</p><p>Second.</p></article></body></html>",
             encoding="utf-8",
         )
         expected = 1

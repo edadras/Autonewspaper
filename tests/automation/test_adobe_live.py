@@ -79,9 +79,7 @@ def test_text_and_image_frames(controller, template, article_blocks, sample_imag
 def test_multi_page_document(controller, template, article_blocks, sample_images):
     """Multi-page Test."""
     engine = LayoutEngine(template, candidates_per_page=3)
-    plan = engine.plan_edition(
-        1, {1: article_blocks[:3], 2: article_blocks[3:]}, page_count=2
-    )
+    plan = engine.plan_edition(1, {1: article_blocks[:3], 2: article_blocks[3:]}, page_count=2)
     data = controller.build_document(plan, template)
     assert len(data["pages"]) == 2
     assert isinstance(data["overflow"], list)
@@ -109,8 +107,11 @@ def test_photoshop_processing(tmp_path, sample_images):
     controller = PhotoshopController(tmp_path)
     try:
         result = controller.process_image(
-            sample_images[0], tmp_path / "processed.jpg",
-            aspect=16 / 9, width_px=1600, dpi=300,
+            sample_images[0],
+            tmp_path / "processed.jpg",
+            aspect=16 / 9,
+            width_px=1600,
+            dpi=300,
         )
         assert result["engine"] == "photoshop"
         assert Path(result["path"]).exists()

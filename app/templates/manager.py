@@ -60,9 +60,7 @@ class TemplateManager:
                 self._sources[spec.id] = file
                 if builtin:
                     self._builtin_ids.add(spec.id)
-        log.info(
-            "Discovered %d template(s) (%d built-in)", len(self._cache), len(self._builtin_ids)
-        )
+        log.info("Discovered %d template(s) (%d built-in)", len(self._cache), len(self._builtin_ids))
         if self.app_db is not None:
             self._sync_database()
         return list(self._cache.values())
@@ -246,9 +244,7 @@ class TemplateManager:
         for missing in sorted(required - present):
             warnings.append(f"Missing paragraph style '{missing}'")
         if spec.column_width_mm() < 25:
-            warnings.append(
-                f"Column width is only {spec.column_width_mm():.1f} mm; body text may not fit"
-            )
+            warnings.append(f"Column width is only {spec.column_width_mm():.1f} mm; body text may not fit")
         body = spec.paragraph_style("body")
         if body and body.size_pt < spec.layout_rules.min_body_size_pt:
             warnings.append("Body style is smaller than the template's own minimum body size")

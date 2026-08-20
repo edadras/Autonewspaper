@@ -24,7 +24,6 @@ from typing import Any
 from PIL import Image, ImageFilter, ImageStat
 
 from app.models.schemas import ElementSpec, IssueType, PageLayout, QAIssue, Rect, Severity
-from app.utils.units import mm_to_px
 
 log = logging.getLogger(__name__)
 
@@ -57,9 +56,7 @@ class PixelMetrics:
             "mean_luminance": round(self.mean_luminance, 2),
             "edge_density": round(self.edge_density, 4),
             "empty_block_count": float(len(self.empty_blocks)),
-            "largest_empty_block": round(
-                max((r.area for r in self.empty_blocks), default=0.0), 2
-            ),
+            "largest_empty_block": round(max((r.area for r in self.empty_blocks), default=0.0), 2),
         }
 
 
@@ -85,8 +82,10 @@ class PageAnalyzer:
 
             content = page.content_rect
             content_box = (
-                int(content.x * scale_x), int(content.y * scale_y),
-                int(content.right * scale_x), int(content.bottom * scale_y),
+                int(content.x * scale_x),
+                int(content.y * scale_y),
+                int(content.right * scale_x),
+                int(content.bottom * scale_y),
             )
             live = image.crop(content_box)
             metrics.ink_coverage = self._ink_ratio(live)
@@ -100,9 +99,7 @@ class PageAnalyzer:
             metrics.margin_ink = self._margin_ink(image, page, scale_x, scale_y)
             metrics.empty_blocks = self._empty_blocks(live, page, content)
             for element in page.elements:
-                metrics.element_ink[element.id] = self._element_ink(
-                    image, element, scale_x, scale_y
-                )
+                metrics.element_ink[element.id] = self._element_ink(image, element, scale_x, scale_y)
         return metrics
 
     @staticmethod
@@ -114,9 +111,7 @@ class PageAnalyzer:
             return sum(histogram[threshold:]) / total
         return sum(histogram[:threshold]) / total
 
-    def _margin_ink(
-        self, image: Image.Image, page: PageLayout, scale_x: float, scale_y: float
-    ) -> float:
+    def _margin_ink(self, image: Image.Image, page: PageLayout, scale_x: float, scale_y: float) -> float:
         """Ink outside the live area, excluding the folio band."""
         content = page.content_rect
         bands = [
@@ -135,9 +130,7 @@ class PageAnalyzer:
             area += pixels
         return inked / max(1.0, area)
 
-    def _empty_blocks(
-        self, live: Image.Image, page: PageLayout, content: Rect
-    ) -> list[Rect]:
+    def _empty_blocks(self, live: Image.Image, page: PageLayout, content: Rect) -> list[Rect]:
         """Find blank rectangles in the live area, measured on the pixels."""
         steps_x, steps_y = 20, 26
         cell_w, cell_h = live.width / steps_x, live.height / steps_y
@@ -145,8 +138,10 @@ class PageAnalyzer:
         for row in range(steps_y):
             for col in range(steps_x):
                 box = (
-                    int(col * cell_w), int(row * cell_h),
-                    int((col + 1) * cell_w), int((row + 1) * cell_h),
+                    int(col * cell_w),
+                    int(row * cell_h),
+                    int((col + 1) * cell_w),
+                    int((row + 1) * cell_h),
                 )
                 if box[2] <= box[0] or box[3] <= box[1]:
                     continue
@@ -159,11 +154,7 @@ class PageAnalyzer:
                 if occupied[row][col] or seen[row][col]:
                     continue
                 width = 0
-                while (
-                    col + width < steps_x
-                    and not occupied[row][col + width]
-                    and not seen[row][col + width]
-                ):
+                while col + width < steps_x and not occupied[row][col + width] and not seen[row][col + width]:
                     width += 1
                 height = 1
                 while row + height < steps_y and all(
@@ -186,14 +177,14 @@ class PageAnalyzer:
                 )
         return sorted(blocks, key=lambda r: -r.area)
 
-    def _element_ink(
-        self, image: Image.Image, element: ElementSpec, scale_x: float, scale_y: float
-    ) -> float:
+    def _element_ink(self, image: Image.Image, element: ElementSpec, scale_x: float, scale_y: float) -> float:
         """Ink coverage inside one element's frame."""
         rect = element.rect
         box = (
-            max(0, int(rect.x * scale_x)), max(0, int(rect.y * scale_y)),
-            min(image.width, int(rect.right * scale_x)), min(image.height, int(rect.bottom * scale_y)),
+            max(0, int(rect.x * scale_x)),
+            max(0, int(rect.y * scale_y)),
+            min(image.width, int(rect.right * scale_x)),
+            min(image.height, int(rect.bottom * scale_y)),
         )
         if box[2] <= box[0] or box[3] <= box[1]:
             return 0.0

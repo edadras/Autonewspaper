@@ -1,6 +1,5 @@
 """Persistence layer."""
 
-from app.models.base import Base, TimestampMixin, utcnow
 from app.database.repositories import (
     ArticleRepository,
     AssetRepository,
@@ -14,6 +13,7 @@ from app.database.repositories import (
     UnitOfWork,
 )
 from app.database.session import AppDatabase, Database, ProjectDatabase
+from app.models.base import Base, TimestampMixin, utcnow
 
 __all__ = [
     "Base",

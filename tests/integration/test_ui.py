@@ -7,7 +7,6 @@ navigated and driven without a display.
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 import pytest
 
@@ -51,8 +50,18 @@ def test_every_page_builds_and_refreshes(window, qt_app):
 def test_the_expected_pages_are_present(window):
     titles = {page.title for page in window.pages}
     for expected in (
-        "Dashboard", "Projects", "New Project", "Content", "Assets", "Templates",
-        "Layout", "Preview", "Export", "AI Settings", "Adobe Settings", "Logs",
+        "Dashboard",
+        "Projects",
+        "New Project",
+        "Content",
+        "Assets",
+        "Templates",
+        "Layout",
+        "Preview",
+        "Export",
+        "AI Settings",
+        "Adobe Settings",
+        "Logs",
     ):
         assert expected in titles
 
@@ -109,9 +118,7 @@ def test_diagnostics_run_from_the_page(window, qt_app):
     assert page.table.rowCount() > 5
 
 
-def test_after_a_run_the_preview_and_layout_pages_have_content(
-    window, qt_app, application, project
-):
+def test_after_a_run_the_preview_and_layout_pages_have_content(window, qt_app, application, project):
     application.pipeline.run(project, mode="auto")
 
     window.show_page("Layout")

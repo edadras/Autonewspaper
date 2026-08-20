@@ -26,7 +26,6 @@ from PySide6.QtWidgets import (
 from app.services.content_manager import SUPPORTED_SUFFIXES
 from app.ui.pages.base import Page
 from app.ui.widgets.common import (
-    Card,
     DataTable,
     DropArea,
     Toolbar,
@@ -190,8 +189,7 @@ class ContentPage(Page):
         for path in paths:
             if path.is_dir():
                 expanded.extend(
-                    child for child in sorted(path.rglob("*"))
-                    if child.suffix.lower() in SUPPORTED_SUFFIXES
+                    child for child in sorted(path.rglob("*")) if child.suffix.lower() in SUPPORTED_SUFFIXES
                 )
             else:
                 expanded.append(path)

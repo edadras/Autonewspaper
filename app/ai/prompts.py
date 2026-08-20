@@ -90,7 +90,7 @@ def parse_prompt_file(path: Path) -> Prompt:
     system, user = "", raw.strip()
     if len(sections) > 1:
         # sections == [preamble, 'system', body, 'user', body, ...]
-        pairs = list(zip(sections[1::2], sections[2::2]))
+        pairs = list(zip(sections[1::2], sections[2::2], strict=False))
         for label, body in pairs:
             if label.lower() == "system":
                 system = body.strip()

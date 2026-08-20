@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -68,17 +68,11 @@ class Parameter:
             raise ToolValidationError(f"'{self.name}' must be an object")
 
         if self.minimum is not None and float(value) < self.minimum:
-            raise ToolValidationError(
-                f"'{self.name}'={value} is below the minimum {self.minimum}"
-            )
+            raise ToolValidationError(f"'{self.name}'={value} is below the minimum {self.minimum}")
         if self.maximum is not None and float(value) > self.maximum:
-            raise ToolValidationError(
-                f"'{self.name}'={value} is above the maximum {self.maximum}"
-            )
+            raise ToolValidationError(f"'{self.name}'={value} is above the maximum {self.maximum}")
         if self.choices and value not in self.choices:
-            raise ToolValidationError(
-                f"'{self.name}'={value!r} is not one of {self.choices}"
-            )
+            raise ToolValidationError(f"'{self.name}'={value!r} is not one of {self.choices}")
         return value
 
 
@@ -225,11 +219,7 @@ class ToolRegistry:
 
     def schemas(self) -> list[dict[str, Any]]:
         """Function schemas for the tools the policy currently permits."""
-        return [
-            tool.schema()
-            for tool in self._tools.values()
-            if self.policy.allows(tool.capability)
-        ]
+        return [tool.schema() for tool in self._tools.values() if self.policy.allows(tool.capability)]
 
     def describe(self) -> str:
         """Human-readable tool list, embedded in the agent prompt."""
@@ -237,9 +227,7 @@ class ToolRegistry:
         for tool in sorted(self._tools.values(), key=lambda t: t.name):
             if not self.policy.allows(tool.capability):
                 continue
-            args = ", ".join(
-                f"{p.name}: {p.type}" + ("" if p.required else "?") for p in tool.parameters
-            )
+            args = ", ".join(f"{p.name}: {p.type}" + ("" if p.required else "?") for p in tool.parameters)
             lines.append(f"- {tool.name}({args}) - {tool.description}")
         return "\n".join(lines)
 
@@ -264,9 +252,7 @@ class ToolRegistry:
         if not self.policy.allows(tool.capability):
             message = f"The capability '{tool.capability}' required by '{name}' is not granted"
             log.warning("%s", message)
-            return self._record(
-                ToolResult(name, False, error=message, duration=time.monotonic() - started)
-            )
+            return self._record(ToolResult(name, False, error=message, duration=time.monotonic() - started))
 
         self._emit(EventType.ADOBE_COMMAND, tool=name, arguments=cleaned)
         try:
@@ -279,7 +265,9 @@ class ToolRegistry:
             log.error("Tool '%s' failed: %s", name, exc, exc_info=exc)
             return self._record(
                 ToolResult(
-                    name, False, error=f"{type(exc).__name__}: {exc}",
+                    name,
+                    False,
+                    error=f"{type(exc).__name__}: {exc}",
                     duration=time.monotonic() - started,
                 )
             )
@@ -323,9 +311,7 @@ class ToolRegistry:
         return {
             "calls": len(self.history),
             "failures": sum(1 for r in self.history if not r.ok),
-            "by_tool": {
-                name: sum(1 for r in self.history if r.tool == name) for name in self.names()
-            },
+            "by_tool": {name: sum(1 for r in self.history if r.tool == name) for name in self.names()},
         }
 
 

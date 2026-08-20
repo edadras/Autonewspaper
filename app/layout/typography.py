@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from app.models.schemas import ElementType, Rect, TypographySpec
 from app.templates.schema import ParagraphStyleSpec, TemplateSpec
 from app.utils import text as T
-from app.utils.units import mm_to_pt, pt_to_mm
+from app.utils.units import pt_to_mm
 
 log = logging.getLogger(__name__)
 
@@ -206,8 +206,11 @@ class TypographyEngine:
                     text=trimmed,
                     overflow=0.0,
                     lines=T.estimate_lines(
-                        trimmed, rect.width, best.typography.size_pt,
-                        columns=columns, gutter_mm=typography.column_gutter_mm,
+                        trimmed,
+                        rect.width,
+                        best.typography.size_pt,
+                        columns=columns,
+                        gutter_mm=typography.column_gutter_mm,
                         language=self.language,
                     ),
                     truncated=True,
@@ -273,9 +276,7 @@ class TypographyEngine:
         return per_line * possible_lines
 
     # ---------------------------------------------------------- estimates
-    def measure_overflow(
-        self, text: str, rect: Rect, typography: TypographySpec
-    ) -> tuple[float, int]:
+    def measure_overflow(self, text: str, rect: Rect, typography: TypographySpec) -> tuple[float, int]:
         """Overflow fraction and line count of *text* at an existing size.
 
         Used after a correction changed the geometry or the point size: the
@@ -295,9 +296,7 @@ class TypographyEngine:
         needed = lines * pt_to_mm(typography.leading_pt)
         return (round(max(0.0, (needed - usable) / max(1e-6, usable)), 4), lines)
 
-    def height_for(
-        self, text: str, width_mm: float, element_type: ElementType, columns: int = 1
-    ) -> float:
+    def height_for(self, text: str, width_mm: float, element_type: ElementType, columns: int = 1) -> float:
         """Height in millimetres needed to typeset *text* at the default size."""
         typography = self.resolve(element_type, columns=columns)
         return T.estimate_text_height_mm(

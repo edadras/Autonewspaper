@@ -52,7 +52,8 @@ def test_arguments_are_validated_before_anything_runs():
     registry = ToolRegistry(PermissionPolicy({"layout.write"}))
     registry.register(
         Tool(
-            "move", "move a frame",
+            "move",
+            "move a frame",
             [
                 Parameter("element_id", "string", "id"),
                 Parameter("x_mm", "number", "x", minimum=0, maximum=500),
@@ -71,9 +72,7 @@ def test_arguments_are_validated_before_anything_runs():
 
 def test_a_denied_capability_blocks_the_call():
     registry = ToolRegistry(PermissionPolicy.read_only())
-    registry.register(
-        Tool("write", "writes", [], handler=lambda: True, capability="layout.write")
-    )
+    registry.register(Tool("write", "writes", [], handler=lambda: True, capability="layout.write"))
     result = registry.invoke("write", {})
     assert not result.ok
     assert "not granted" in result.error
@@ -83,7 +82,9 @@ def test_results_are_verified_against_the_real_state(tmp_path):
     registry = ToolRegistry(PermissionPolicy({"export.write"}))
     registry.register(
         Tool(
-            "export", "claims to export", [Parameter("path", "string", "out")],
+            "export",
+            "claims to export",
+            [Parameter("path", "string", "out")],
             handler=lambda path: {"path": path},
             capability="export.write",
             verifier=verify_exists,
@@ -112,10 +113,22 @@ def test_a_failing_tool_never_escapes():
 def test_every_specified_tool_is_registered(agent_context):
     registry = build_toolset(agent_context)
     for name in (
-        "open_indesign", "open_photoshop", "create_page", "create_text_frame",
-        "create_image_frame", "place_image", "insert_text", "resize_element",
-        "move_element", "apply_style", "render_page", "analyze_page",
-        "generate_image", "process_image", "export_pdf", "save_project",
+        "open_indesign",
+        "open_photoshop",
+        "create_page",
+        "create_text_frame",
+        "create_image_frame",
+        "place_image",
+        "insert_text",
+        "resize_element",
+        "move_element",
+        "apply_style",
+        "render_page",
+        "analyze_page",
+        "generate_image",
+        "process_image",
+        "export_pdf",
+        "save_project",
     ):
         assert name in registry.names(), f"{name} is missing from the tool surface"
 
@@ -125,9 +138,7 @@ def test_the_tools_refuse_to_break_the_page(agent_context):
     page = agent_context.plan.pages[0]
     element = [e for e in page.elements if not e.locked][0]
 
-    off_page = registry.invoke(
-        "move_element", {"element_id": element.id, "x_mm": 1900, "y_mm": 10}
-    )
+    off_page = registry.invoke("move_element", {"element_id": element.id, "x_mm": 1900, "y_mm": 10})
     assert not off_page.ok
 
     other = [e for e in page.elements if not e.locked and e.id != element.id][0]
@@ -145,9 +156,7 @@ def test_locked_master_furniture_cannot_be_moved(agent_context):
     locked = [e for e in page.elements if e.locked]
     if not locked:
         pytest.skip("this template places no master furniture on the page")
-    result = registry.invoke(
-        "move_element", {"element_id": locked[0].id, "x_mm": 20, "y_mm": 20}
-    )
+    result = registry.invoke("move_element", {"element_id": locked[0].id, "x_mm": 20, "y_mm": 20})
     assert not result.ok
     assert "locked" in result.error.lower()
 
@@ -181,7 +190,11 @@ def test_the_agent_fixes_a_frame_it_can_reach(application, agent_context):
 
     registry = build_toolset(agent_context)
     agent = AutonomousAgent(
-        application.ai, registry, max_iterations=8, timeout_seconds=90, max_retries=2,
+        application.ai,
+        registry,
+        max_iterations=8,
+        timeout_seconds=90,
+        max_retries=2,
         fallback=qa_fallback_planner(1),
     )
     run = agent.run("Bring page 1 back within its margins")
@@ -195,10 +208,14 @@ def test_the_agent_fixes_a_frame_it_can_reach(application, agent_context):
 def test_the_loop_is_bounded_by_its_iteration_limit(application, agent_context):
     registry = build_toolset(agent_context)
     agent = AutonomousAgent(
-        application.ai, registry, max_iterations=3, timeout_seconds=60, max_retries=5,
-        fallback=lambda steps: __import__(
-            "app.agents.autonomous", fromlist=["AgentStep"]
-        ).AgentStep(index=0, thought="loop", tool="render_page", arguments={"page": 1}),
+        application.ai,
+        registry,
+        max_iterations=3,
+        timeout_seconds=60,
+        max_retries=5,
+        fallback=lambda steps: __import__("app.agents.autonomous", fromlist=["AgentStep"]).AgentStep(
+            index=0, thought="loop", tool="render_page", arguments={"page": 1}
+        ),
     )
     run = agent.run("never satisfied")
     assert len(run.steps) <= 3
@@ -210,9 +227,15 @@ def test_the_loop_stops_after_repeated_failures(application, agent_context):
 
     registry = build_toolset(agent_context)
     agent = AutonomousAgent(
-        application.ai, registry, max_iterations=10, timeout_seconds=60, max_retries=1,
+        application.ai,
+        registry,
+        max_iterations=10,
+        timeout_seconds=60,
+        max_retries=1,
         fallback=lambda steps: AgentStep(
-            index=0, thought="bad call", tool="move_element",
+            index=0,
+            thought="bad call",
+            tool="move_element",
             arguments={"element_id": f"missing_{len(steps)}", "x_mm": 10, "y_mm": 10},
         ),
     )

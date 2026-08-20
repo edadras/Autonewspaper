@@ -61,9 +61,7 @@ class AnthropicProvider(AIProvider):
     @staticmethod
     def _split_system(request: TextRequest) -> tuple[str, list[dict[str, Any]]]:
         system_parts = [m.content for m in request.messages if m.role == "system"]
-        turns = [
-            {"role": m.role, "content": m.content} for m in request.messages if m.role != "system"
-        ]
+        turns = [{"role": m.role, "content": m.content} for m in request.messages if m.role != "system"]
         if not turns:
             turns = [{"role": "user", "content": " "}]
         return "\n\n".join(system_parts), turns

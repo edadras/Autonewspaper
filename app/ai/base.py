@@ -198,8 +198,12 @@ class AIProvider(abc.ABC):
     async def health_check(self) -> ProviderHealth:
         """Verify credentials and connectivity."""
 
-    async def close(self) -> None:
-        """Release network resources."""
+    async def close(self) -> None:  # noqa: B027 - optional hook, not every provider holds resources
+        """Release network resources.
+
+        Providers that hold no connection (the offline analyser) inherit this
+        no-op rather than being forced to implement an empty method.
+        """
 
     def describe(self) -> dict[str, Any]:
         """Summary used by the AI Settings page."""

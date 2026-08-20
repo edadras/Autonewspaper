@@ -13,8 +13,8 @@ from typing import Any, Generic, TypeVar
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from app.models.base import Base
 from app.models import entities as E  # noqa: N812
+from app.models.base import Base
 
 log = logging.getLogger(__name__)
 
@@ -146,9 +146,7 @@ class AssetRepository(Repository[E.Asset]):
         """Assets linked to an article, best quality first."""
         return list(
             self.session.scalars(
-                select(E.Asset)
-                .where(E.Asset.article_id == article_id)
-                .order_by(E.Asset.quality_score.desc())
+                select(E.Asset).where(E.Asset.article_id == article_id).order_by(E.Asset.quality_score.desc())
             ).all()
         )
 

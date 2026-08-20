@@ -152,27 +152,30 @@ class PhotoshopController:
         if self.app.installed:
             try:
                 self.connect()
-                result = self.bridge.run(
-                    build_photoshop_script(spec), operation="process_image"
-                )
+                result = self.bridge.run(build_photoshop_script(spec), operation="process_image")
                 if result.ok:
                     data = dict(result.data or {})
-                    data.update({"engine": "photoshop", "strategy": result.strategy,
-                                 "path": str(target)})
-                    self._emit(EventType.ADOBE_COMMAND, host="photoshop", command="process_image",
-                               path=str(target))
+                    data.update({"engine": "photoshop", "strategy": result.strategy, "path": str(target)})
+                    self._emit(
+                        EventType.ADOBE_COMMAND, host="photoshop", command="process_image", path=str(target)
+                    )
                     return data
                 log.warning("Photoshop reported an error: %s", result.message())
             except Exception as exc:  # noqa: BLE001 - fall through to Pillow
                 log.warning("Photoshop processing failed (%s); using the local engine", exc)
 
         if not self.allow_local_fallback:
-            raise AssetError(
-                f"Photoshop could not process {source.name} and the local engine is disabled"
-            )
+            raise AssetError(f"Photoshop could not process {source.name} and the local engine is disabled")
         return self._process_locally(
-            source, target, aspect=aspect, width_px=width_px, height_px=height_px,
-            adjust=adjust, quality=quality, mode=mode, remove_background=remove_background,
+            source,
+            target,
+            aspect=aspect,
+            width_px=width_px,
+            height_px=height_px,
+            adjust=adjust,
+            quality=quality,
+            mode=mode,
+            remove_background=remove_background,
         )
 
     def _process_locally(
@@ -197,7 +200,9 @@ class PhotoshopController:
         if width_px or height_px:
             analysis = imaging.image_info(current)
             final_w = width_px or int(analysis["width"])
-            final_h = height_px or int(round(final_w / max(1e-6, aspect or (analysis["width"] / max(1, analysis["height"])))))
+            final_h = height_px or int(
+                round(final_w / max(1e-6, aspect or (analysis["width"] / max(1, analysis["height"]))))
+            )
             resized = target.with_name(f"{target.stem}_resize{target.suffix}")
             current = imaging.resize_to_fit(current, resized, final_w, final_h, quality=quality)
         if adjust:

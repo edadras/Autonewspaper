@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import shutil
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -258,7 +258,7 @@ class ProjectManager:
             "design_style": project["design_style"],
             "status": project["status"],
             "created_at": project["created_at"],
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
             "application": "AI Newspaper Studio",
         }
         if spec is not None:
@@ -269,7 +269,11 @@ class ProjectManager:
     def open(self, slug_or_path: str | Path) -> ProjectHandle:
         """Open an existing project by slug or directory."""
         candidate = Path(slug_or_path)
-        directory = candidate if candidate.is_absolute() or candidate.exists() else self.paths.projects / str(slug_or_path)
+        directory = (
+            candidate
+            if candidate.is_absolute() or candidate.exists()
+            else self.paths.projects / str(slug_or_path)
+        )
         directory = directory.resolve()
         if not directory.exists():
             raise ProjectError(
@@ -345,9 +349,18 @@ class ProjectManager:
     def update(self, handle: ProjectHandle, **fields: Any) -> dict[str, Any]:
         """Update project fields and refresh the manifest."""
         allowed = {
-            "name", "publication_name", "edition_date", "language", "product_type",
-            "page_size", "page_width_mm", "page_height_mm", "page_count",
-            "template_id", "design_style", "status",
+            "name",
+            "publication_name",
+            "edition_date",
+            "language",
+            "product_type",
+            "page_size",
+            "page_width_mm",
+            "page_height_mm",
+            "page_count",
+            "template_id",
+            "design_style",
+            "status",
         }
         unknown = set(fields) - allowed
         if unknown:
@@ -422,8 +435,11 @@ class ProjectManager:
             project_id = row.id
             self.app_db.register_project(row)
         new_handle = ProjectHandle(
-            slug=slug, directory=target, database=database,
-            versions=VersionManager(target), project_id=project_id,
+            slug=slug,
+            directory=target,
+            database=database,
+            versions=VersionManager(target),
+            project_id=project_id,
         )
         self._write_manifest(new_handle)
         self._open[slug] = new_handle
@@ -455,12 +471,8 @@ class ProjectManager:
                 "pages": len(pages),
                 "built_pages": sum(1 for p in pages if p.status == "built"),
                 "empty_pages": sum(1 for p in pages if p.status == "empty"),
-                "average_score": _mean(
-                    [p.qa_score for p in pages if p.status != "empty"]
-                ),
-                "last_run": {
-                    "status": run.status, "stage": run.stage, "score": run.score
-                } if run else None,
+                "average_score": _mean([p.qa_score for p in pages if p.status != "empty"]),
+                "last_run": {"status": run.status, "stage": run.stage, "score": run.score} if run else None,
             }
 
     def _emit(self, event: EventType, **payload: Any) -> None:

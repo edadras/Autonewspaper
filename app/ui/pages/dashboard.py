@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QProgressBar,
     QPushButton,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -213,9 +212,7 @@ class DashboardPage(Page):
             f"engine: {result.get('adobe_strategy', 'unknown')}"
         )
         warnings = result.get("warnings") or []
-        self.warnings_label.setText(
-            "\n".join(f"• {w}" for w in warnings[:6]) if warnings else ""
-        )
+        self.warnings_label.setText("\n".join(f"• {w}" for w in warnings[:6]) if warnings else "")
         self.set_running(False)
         self.refresh()
 

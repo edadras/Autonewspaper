@@ -37,16 +37,28 @@ PRESET_FILENAMES = {
 FALLBACK_PRESETS = [
     PDFPresetSpec(id="print", label="Print", indesign_preset="[Press Quality]", downsample_dpi=300),
     PDFPresetSpec(
-        id="high_quality", label="High quality", indesign_preset="[High Quality Print]",
+        id="high_quality",
+        label="High quality",
+        indesign_preset="[High Quality Print]",
         downsample_dpi=350,
     ),
     PDFPresetSpec(
-        id="digital", label="Digital", indesign_preset="[High Quality Print]",
-        color_space="RGB", include_bleed=False, include_marks=False, downsample_dpi=180,
+        id="digital",
+        label="Digital",
+        indesign_preset="[High Quality Print]",
+        color_space="RGB",
+        include_bleed=False,
+        include_marks=False,
+        downsample_dpi=180,
     ),
     PDFPresetSpec(
-        id="web", label="Web", indesign_preset="[Smallest File Size]", color_space="RGB",
-        include_bleed=False, include_marks=False, downsample_dpi=110,
+        id="web",
+        label="Web",
+        indesign_preset="[Smallest File Size]",
+        color_space="RGB",
+        include_bleed=False,
+        include_marks=False,
+        downsample_dpi=110,
     ),
 ]
 
@@ -99,7 +111,7 @@ class ExportService:
     # ---------------------------------------------------------------- pdfs
     def export(
         self,
-        handle: "ProjectHandle",
+        handle: ProjectHandle,
         plan: LayoutPlan,
         template: TemplateSpec,
         *,
@@ -142,9 +154,7 @@ class ExportService:
             if export_idml:
                 try:
                     assert self.indesign is not None
-                    idml = self.indesign.export_idml(
-                        handle.adobe_dir / "indesign" / f"{handle.slug}.idml"
-                    )
+                    idml = self.indesign.export_idml(handle.adobe_dir / "indesign" / f"{handle.slug}.idml")
                     result.idml = str(idml)
                 except Exception as exc:  # noqa: BLE001
                     result.warnings.append(f"IDML export failed: {exc}")
@@ -153,9 +163,7 @@ class ExportService:
             # Either InDesign is absent or every export attempt failed.
             result.engine = "builtin"
             if use_indesign:
-                result.warnings.append(
-                    "InDesign produced no PDF; the built-in renderer was used instead."
-                )
+                result.warnings.append("InDesign produced no PDF; the built-in renderer was used instead.")
             renderer = PreviewRenderer(template, dpi=max(150, preview_dpi))
             for preset_id in wanted:
                 preset = available.get(preset_id)
@@ -165,9 +173,7 @@ class ExportService:
                     renderer.render_pdf(plan, target, dpi=dpi)
                     result.pdfs[preset_id] = str(target)
                 except Exception as exc:  # noqa: BLE001
-                    raise ExportError(
-                        f"Could not produce the '{preset_id}' PDF: {exc}", cause=exc
-                    ) from exc
+                    raise ExportError(f"Could not produce the '{preset_id}' PDF: {exc}", cause=exc) from exc
             result.warnings.append(
                 "The PDF was rendered by the built-in engine, not InDesign; "
                 "colour management and preflight settings are not applied."
@@ -198,13 +204,15 @@ class ExportService:
         self._emit(EventType.EXPORT_READY, slug=handle.slug, **result.to_dict())
         log.info(
             "Exported %d PDF(s) with the %s engine into %s",
-            len(result.pdfs), result.engine, output,
+            len(result.pdfs),
+            result.engine,
+            output,
         )
         return result
 
     def _previews(
         self,
-        handle: "ProjectHandle",
+        handle: ProjectHandle,
         plan: LayoutPlan,
         template: TemplateSpec,
         dpi: int,
@@ -223,9 +231,7 @@ class ExportService:
                     previews.append(str(target))
                     continue
                 except Exception as exc:  # noqa: BLE001
-                    result.warnings.append(
-                        f"InDesign preview for page {page.index} failed: {exc}"
-                    )
+                    result.warnings.append(f"InDesign preview for page {page.index} failed: {exc}")
             try:
                 png = target.with_suffix(".png")
                 renderer.render_page(page, png)
@@ -251,7 +257,7 @@ class ExportService:
             for preset in presets
         ]
 
-    def package(self, handle: "ProjectHandle", folder: Path | None = None) -> Path | None:
+    def package(self, handle: ProjectHandle, folder: Path | None = None) -> Path | None:
         """Package the InDesign document with its links and fonts."""
         if self.indesign is None or not self.indesign.available():
             log.info("Packaging requires InDesign; skipped")

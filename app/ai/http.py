@@ -67,7 +67,12 @@ class HTTPClient:
                 last_error = exc
                 log.warning(
                     "%s %s %s failed (attempt %d/%d): %s",
-                    self.provider, method, path, attempt + 1, self.max_retries + 1, exc,
+                    self.provider,
+                    method,
+                    path,
+                    attempt + 1,
+                    self.max_retries + 1,
+                    exc,
                 )
             else:
                 if response.status_code < 400:
@@ -76,7 +81,11 @@ class HTTPClient:
                     delay = self._backoff(attempt, response)
                     log.warning(
                         "%s returned %s; retrying in %.1fs (attempt %d/%d)",
-                        self.provider, response.status_code, delay, attempt + 1, self.max_retries + 1,
+                        self.provider,
+                        response.status_code,
+                        delay,
+                        attempt + 1,
+                        self.max_retries + 1,
                     )
                     await asyncio.sleep(delay)
                     continue

@@ -69,22 +69,25 @@ class EventBridge(QObject):
         elif event_type is EventType.APPROVAL_REQUIRED:
             self.approval_required.emit(payload)
         elif event_type in (
-            EventType.JOB_QUEUED, EventType.JOB_STARTED, EventType.JOB_PROGRESS,
-            EventType.JOB_FINISHED, EventType.JOB_FAILED,
+            EventType.JOB_QUEUED,
+            EventType.JOB_STARTED,
+            EventType.JOB_PROGRESS,
+            EventType.JOB_FINISHED,
+            EventType.JOB_FAILED,
         ):
             self.job_changed.emit(payload)
         elif event_type in (
-            EventType.PROJECT_CREATED, EventType.PROJECT_OPENED,
-            EventType.PROJECT_SAVED, EventType.PROJECT_CHANGED,
+            EventType.PROJECT_CREATED,
+            EventType.PROJECT_OPENED,
+            EventType.PROJECT_SAVED,
+            EventType.PROJECT_CHANGED,
         ):
             self.project_changed.emit(payload)
         elif event_type is EventType.CONTENT_IMPORTED:
             self.content_imported.emit(payload)
         elif event_type in (EventType.ASSET_IMPORTED, EventType.ASSET_GENERATED):
             self.asset_changed.emit(payload)
-        elif event_type in (
-            EventType.LAYOUT_PLANNED, EventType.LAYOUT_SCORED, EventType.LAYOUT_CORRECTED
-        ):
+        elif event_type in (EventType.LAYOUT_PLANNED, EventType.LAYOUT_SCORED, EventType.LAYOUT_CORRECTED):
             self.layout_planned.emit(payload)
         elif event_type is EventType.QA_REPORT:
             self.qa_report.emit(payload)

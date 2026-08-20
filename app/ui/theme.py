@@ -37,18 +37,34 @@ class Palette:
     def dark(cls) -> Palette:
         """The dark theme."""
         return cls(
-            background="#14161a", surface="#1c1f25", surface_alt="#23272f", border="#2f343d",
-            text="#e8eaed", text_muted="#9aa2ae", accent="#3f8cff", accent_text="#ffffff",
-            success="#3fbf7f", warning="#e0a33e", danger="#e0554a",
+            background="#14161a",
+            surface="#1c1f25",
+            surface_alt="#23272f",
+            border="#2f343d",
+            text="#e8eaed",
+            text_muted="#9aa2ae",
+            accent="#3f8cff",
+            accent_text="#ffffff",
+            success="#3fbf7f",
+            warning="#e0a33e",
+            danger="#e0554a",
         )
 
     @classmethod
     def light(cls) -> Palette:
         """The light theme."""
         return cls(
-            background="#f4f5f7", surface="#ffffff", surface_alt="#eceef1", border="#d6d9de",
-            text="#1a1d21", text_muted="#5c636d", accent="#1a6fe0", accent_text="#ffffff",
-            success="#1f9d5e", warning="#b57a12", danger="#c73a2e",
+            background="#f4f5f7",
+            surface="#ffffff",
+            surface_alt="#eceef1",
+            border="#d6d9de",
+            text="#1a1d21",
+            text_muted="#5c636d",
+            accent="#1a6fe0",
+            accent_text="#ffffff",
+            success="#1f9d5e",
+            warning="#b57a12",
+            danger="#c73a2e",
         )
 
 

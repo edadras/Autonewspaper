@@ -22,8 +22,8 @@ from sqlalchemy import Engine, create_engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.errors import DatabaseError
-from app.models.base import Base
 from app.models import entities as E  # noqa: N812 - entity module alias
+from app.models.base import Base
 
 log = logging.getLogger(__name__)
 

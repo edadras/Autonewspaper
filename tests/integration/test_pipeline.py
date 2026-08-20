@@ -5,8 +5,6 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
-import pytest
-
 from app.core.jobs import CancelToken
 from app.models.schemas import ApprovalRequest, LayoutPlan, PipelineStage, ProjectSpec
 
@@ -94,9 +92,7 @@ def test_semi_automatic_mode_asks_for_approval(application, project):
 
 
 def test_declining_an_approval_stops_the_run(application, project):
-    result = application.pipeline.run(
-        project, mode="semi_auto", approval=lambda request: False
-    )
+    result = application.pipeline.run(project, mode="semi_auto", approval=lambda request: False)
     assert not result.success
     with project.uow() as uow:
         assert uow.runs.latest(project.project_id).status == "cancelled"
@@ -119,9 +115,7 @@ def test_an_interrupted_run_is_offered_for_resume(application, project):
     with project.uow() as uow:
         from app.models import entities as E
 
-        uow.runs.add(
-            E.PipelineRun(project_id=project.project_id, status="running", stage="layout")
-        )
+        uow.runs.add(E.PipelineRun(project_id=project.project_id, status="running", stage="layout"))
     resumable = application.projects.resumable(project)
     assert resumable is not None and resumable["stage"] == "layout"
 
@@ -132,9 +126,7 @@ def test_an_interrupted_run_is_offered_for_resume(application, project):
 
 def test_resuming_skips_the_completed_stages(application, project):
     application.pipeline.run(project, mode="auto")
-    result = application.pipeline.run(
-        project, mode="auto", resume_from=PipelineStage.EXPORT
-    )
+    result = application.pipeline.run(project, mode="auto", resume_from=PipelineStage.EXPORT)
     assert result.success
     assert result.pdf_paths
 
@@ -159,9 +151,7 @@ def test_the_correction_loop_is_bounded(application, project):
 
 
 def test_thin_copy_is_concentrated_rather_than_spread(application, sample_articles_file, sample_images):
-    handle = application.create_project(
-        ProjectSpec(name="Thin", page_count=8, language="fa")
-    )
+    handle = application.create_project(ProjectSpec(name="Thin", page_count=8, language="fa"))
     application.content.import_files(handle, [sample_articles_file])
     application.assets.import_files(handle, sample_images)
     result = application.pipeline.run(handle, mode="auto")

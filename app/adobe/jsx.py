@@ -65,9 +65,7 @@ class Script:
 
     def render(self) -> str:
         """Full program text, ready to run."""
-        result_line = (
-            f"AINS.setResultPath({js(str(self.result_path))});" if self.result_path else ""
-        )
+        result_line = f"AINS.setResultPath({js(str(self.result_path))});" if self.result_path else ""
         return "\n".join(
             [
                 "// AI Newspaper Studio - generated script",
@@ -230,8 +228,7 @@ def page_payload(page: PageLayout, template: TemplateSpec) -> dict[str, Any]:
         "master": page.master,
         "section": page.section,
         "elements": [
-            element_payload(element, template)
-            for element in sorted(page.elements, key=lambda e: e.z_index)
+            element_payload(element, template) for element in sorted(page.elements, key=lambda e: e.z_index)
         ],
     }
 
@@ -267,9 +264,7 @@ def collect_paragraph_styles(page: PageLayout, template: TemplateSpec) -> list[d
     return list(seen.values())
 
 
-def build_page_script(
-    page: PageLayout, template: TemplateSpec, result_path: Path | None = None
-) -> Script:
+def build_page_script(page: PageLayout, template: TemplateSpec, result_path: Path | None = None) -> Script:
     """Generate the script that builds one page in an open document."""
     styles = collect_paragraph_styles(page, template)
     payload = page_payload(page, template)

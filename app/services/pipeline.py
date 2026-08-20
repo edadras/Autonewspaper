@@ -17,7 +17,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -122,12 +122,13 @@ class Pipeline:
         template = self.templates.get_or_default(handle.project()["template_id"])
 
         run_id = self._start_run(handle, mode)
-        context = PipelineContext(
-            handle=handle, template=template, run_id=run_id, mode=mode, token=token
-        )
+        context = PipelineContext(handle=handle, template=template, run_id=run_id, mode=mode, token=token)
         result = PipelineResult(project_id=handle.project_id)
         self.bus.publish(
-            EventType.PIPELINE_STARTED, slug=handle.slug, mode=mode, run_id=run_id,
+            EventType.PIPELINE_STARTED,
+            slug=handle.slug,
+            mode=mode,
+            run_id=run_id,
             template=template.id,
         )
 
@@ -169,9 +170,7 @@ class Pipeline:
                     report = to_report(exc, Component.PIPELINE)
                     context.errors.append(report)
                     log.error("Stage '%s' failed: %s", stage.value, report.summary(), exc_info=exc)
-                    self.bus.publish(
-                        EventType.ERROR, stage=stage.value, error=report.to_dict()
-                    )
+                    self.bus.publish(EventType.ERROR, stage=stage.value, error=report.to_dict())
                     if config.pipeline.stop_on_first_error or stage in _CRITICAL_STAGES:
                         result.stage_reached = stage
                         raise
@@ -196,18 +195,14 @@ class Pipeline:
             if token.cancelled:
                 # The failure is a consequence of the operator stopping the run.
                 self._finish_run(context, "cancelled")
-                self.bus.publish(
-                    EventType.PIPELINE_CANCELLED, slug=handle.slug, reason=report.message
-                )
+                self.bus.publish(EventType.PIPELINE_CANCELLED, slug=handle.slug, reason=report.message)
                 result.success = False
                 result.warnings = context.warnings
                 result.errors = [e.to_dict() for e in context.errors]
                 result.duration_seconds = time.monotonic() - context.started
                 return result
             self._finish_run(context, "failed")
-            self.bus.publish(
-                EventType.PIPELINE_FAILED, slug=handle.slug, error=report.to_dict()
-            )
+            self.bus.publish(EventType.PIPELINE_FAILED, slug=handle.slug, error=report.to_dict())
             result.success = False
             result.warnings = context.warnings
             result.errors = [e.to_dict() for e in context.errors]
@@ -216,15 +211,11 @@ class Pipeline:
 
         self._populate_result(context, result)
         self._finish_run(context, "completed", result)
-        self.bus.publish(
-            EventType.PIPELINE_FINISHED, slug=handle.slug, result=result.model_dump(mode="json")
-        )
+        self.bus.publish(EventType.PIPELINE_FINISHED, slug=handle.slug, result=result.model_dump(mode="json"))
         log.info(result.summary())
         return result
 
-    def _restore_for_resume(
-        self, ctx: PipelineContext, order: list[PipelineStage], skip_until: int
-    ) -> int:
+    def _restore_for_resume(self, ctx: PipelineContext, order: list[PipelineStage], skip_until: int) -> int:
         """Load the artefacts the skipped stages would have produced.
 
         A resumed run must not start from a later stage with an empty context;
@@ -239,23 +230,22 @@ class Pipeline:
                 ctx.warn(f"The stored editorial plan could not be read: {exc}")
 
         needs_plan = order[skip_until] not in (
-            PipelineStage.IMPORT, PipelineStage.ANALYZE, PipelineStage.EDITORIAL,
-            PipelineStage.ASSETS, PipelineStage.IMAGE_GENERATION,
+            PipelineStage.IMPORT,
+            PipelineStage.ANALYZE,
+            PipelineStage.EDITORIAL,
+            PipelineStage.ASSETS,
+            PipelineStage.IMAGE_GENERATION,
         )
         if not needs_plan:
             return skip_until
         if ctx.handle.layout_plan_path.exists():
             try:
                 ctx.plan = LayoutPlan.load(ctx.handle.layout_plan_path)
-                log.info(
-                    "Resuming with the stored layout plan (%d page(s))", len(ctx.plan.pages)
-                )
+                log.info("Resuming with the stored layout plan (%d page(s))", len(ctx.plan.pages))
                 return skip_until
             except Exception as exc:  # noqa: BLE001
                 ctx.warn(f"The stored layout plan could not be read: {exc}")
-        ctx.warn(
-            "No usable layout plan was found for the resume; restarting from the layout stage."
-        )
+        ctx.warn("No usable layout plan was found for the resume; restarting from the layout stage.")
         return order.index(PipelineStage.LAYOUT)
 
     # ------------------------------------------------------------- stages
@@ -333,7 +323,9 @@ class Pipeline:
         self._apply_editorial(ctx, plan)
         log.info(
             "Stage editorial: %d article(s) scored by %s/%s",
-            len(plan.analyses), plan.provider, plan.model,
+            len(plan.analyses),
+            plan.provider,
+            plan.model,
         )
 
     def _effective_page_count(
@@ -465,16 +457,19 @@ class Pipeline:
         self._persist_plan(ctx, plan)
         unplaced = plan.meta.get("unplaced_articles") or []
         if unplaced:
-            ctx.warn(
-                f"{len(unplaced)} story/stories did not fit the edition; add pages or shorten copy."
-            )
+            ctx.warn(f"{len(unplaced)} story/stories did not fit the edition; add pages or shorten copy.")
         self.bus.publish(
-            EventType.LAYOUT_PLANNED, slug=ctx.handle.slug, pages=len(plan.pages),
-            elements=plan.element_count(), score=plan.score,
+            EventType.LAYOUT_PLANNED,
+            slug=ctx.handle.slug,
+            pages=len(plan.pages),
+            elements=plan.element_count(),
+            score=plan.score,
         )
         log.info(
             "Stage layout: %d page(s), %d frame(s), score %.1f",
-            len(plan.pages), plan.element_count(), plan.score,
+            len(plan.pages),
+            plan.element_count(),
+            plan.score,
         )
 
     def _blocks_by_page(self, ctx: PipelineContext) -> dict[int, list[ArticleBlock]]:
@@ -485,9 +480,7 @@ class Pipeline:
             for article in articles:
                 page = article.recommended_page or article.page_preference or 1
                 asset = None
-                candidates = [
-                    a for a in uow.assets.for_article(article.id) if a.duplicate_of is None
-                ]
+                candidates = [a for a in uow.assets.for_article(article.id) if a.duplicate_of is None]
                 if candidates:
                     asset = max(candidates, key=lambda a: (a.quality_score, a.width * a.height))
                 area = _area_from(article.recommended_area)
@@ -521,9 +514,7 @@ class Pipeline:
                 )
         return blocks
 
-    def _sections(
-        self, ctx: PipelineContext, blocks: dict[int, list[ArticleBlock]]
-    ) -> dict[int, str]:
+    def _sections(self, ctx: PipelineContext, blocks: dict[int, list[ArticleBlock]]) -> dict[int, str]:
         """Name each page after the category that dominates it."""
         sections: dict[int, str] = {}
         language = ctx.handle.project()["language"]
@@ -551,9 +542,7 @@ class Pipeline:
                     qa_score=page.qa_score,
                     iterations=page.iterations,
                     preview_path=str(page.meta.get("preview", "")),
-                    status="empty" if page.meta.get("empty") else (
-                        "built" if page.qa_score else "planned"
-                    ),
+                    status="empty" if page.meta.get("empty") else ("built" if page.qa_score else "planned"),
                 )
                 row.set_meta(page.meta)
                 uow.pages.add(row)
@@ -591,7 +580,9 @@ class Pipeline:
             elif page.score < self.settings.settings.layout.qa_threshold - 15:
                 ctx.warn(f"Page {page.index} scored only {page.score:.1f} before QA")
         self.bus.publish(
-            EventType.LAYOUT_SCORED, slug=ctx.handle.slug, score=ctx.plan.score,
+            EventType.LAYOUT_SCORED,
+            slug=ctx.handle.slug,
+            score=ctx.plan.score,
             pages={p.index: p.score for p in ctx.plan.pages},
         )
         log.info("Stage scoring: edition score %.1f", ctx.plan.score)
@@ -614,7 +605,10 @@ class Pipeline:
             "Process image",
             tasks,
             lambda task, _ctx: self.assets.process_for_frame(
-                ctx.handle, task[0], frame_width_mm=task[1], frame_height_mm=task[2],
+                ctx.handle,
+                task[0],
+                frame_width_mm=task[1],
+                frame_height_mm=task[2],
                 min_dpi=min_dpi,
             ),
         )
@@ -672,7 +666,8 @@ class Pipeline:
             ctx.warn(f"InDesign reports {len(overflow)} overflowing frame(s) before QA")
         log.info(
             "Stage InDesign: document built via '%s' with %d page(s)",
-            ctx.adobe_strategy, len(ctx.plan.pages),
+            ctx.adobe_strategy,
+            len(ctx.plan.pages),
         )
 
     def _stage_qa(self, ctx: PipelineContext) -> None:
@@ -686,7 +681,8 @@ class Pipeline:
         project = ctx.handle.project()
         config = self.settings.settings
         engine = LayoutEngine(
-            ctx.template, language=project["language"],
+            ctx.template,
+            language=project["language"],
             candidates_per_page=config.layout.candidates_per_page,
             seed=config.layout.random_seed,
         )
@@ -712,16 +708,11 @@ class Pipeline:
 
             def render(target_page, _attempt=attempt, _controller=controller):
                 _attempt["n"] += 1
-                preview = (
-                    ctx.handle.previews_dir
-                    / f"page_{target_page.index:03d}_it{_attempt['n']}.png"
-                )
+                preview = ctx.handle.previews_dir / f"page_{target_page.index:03d}_it{_attempt['n']}.png"
                 report = None
                 if _controller is not None:
                     try:
-                        _controller.render_preview(
-                            target_page.index, preview, dpi=config.export.preview_dpi
-                        )
+                        _controller.render_preview(target_page.index, preview, dpi=config.export.preview_dpi)
                         report = _controller.page_report(target_page.index)
                         return (preview, report)
                     except Exception as exc:  # noqa: BLE001
@@ -732,14 +723,15 @@ class Pipeline:
                 renderer.render_page(target_page, preview)
                 return (preview, report)
 
-            loop = agent.run_loop(
-                page, render, asset_quality=quality, asset_pixels=pixels
-            )
+            loop = agent.run_loop(page, render, asset_quality=quality, asset_pixels=pixels)
             corrected_pages.append(loop.page)
             ctx.qa_reports.append(loop.report)
             self.bus.publish(
-                EventType.QA_REPORT, slug=ctx.handle.slug, page=page.index,
-                score=loop.report.score, passed=loop.passed,
+                EventType.QA_REPORT,
+                slug=ctx.handle.slug,
+                page=page.index,
+                score=loop.report.score,
+                passed=loop.passed,
                 issues=len(loop.report.issues),
             )
             if page.meta.get("empty"):
@@ -750,21 +742,18 @@ class Pipeline:
                     f"after {len(loop.iterations)} iteration(s)"
                 )
             if loop.report.preview_path:
-                self.bus.publish(
-                    EventType.PREVIEW_READY, page=page.index, path=loop.report.preview_path
-                )
+                self.bus.publish(EventType.PREVIEW_READY, page=page.index, path=loop.report.preview_path)
 
         rebuilt = [
-            page for page, original in zip(corrected_pages, ctx.plan.pages, strict=False)
+            page
+            for page, original in zip(corrected_pages, ctx.plan.pages, strict=False)
             if page.elements != original.elements
         ]
         ctx.plan.pages = corrected_pages
         # Pages left empty because the edition ran out of copy are reported as
         # a warning; averaging their score would hide the quality of the rest.
         scored = [p for p in corrected_pages if not p.meta.get("empty") and p.elements]
-        ctx.plan.score = round(
-            sum(p.qa_score for p in scored) / len(scored), 2
-        ) if scored else 0.0
+        ctx.plan.score = round(sum(p.qa_score for p in scored) / len(scored), 2) if scored else 0.0
         ctx.plan.save(ctx.handle.layout_plan_path)
         self._persist_plan(ctx, ctx.plan)
 
@@ -777,9 +766,7 @@ class Pipeline:
         controller = self.adobe.indesign
         job = self.jobs.submit(
             "Apply corrections in InDesign",
-            lambda _ctx: [
-                controller.build_page(page, ctx.template) for page in pages
-            ],
+            lambda _ctx: [controller.build_page(page, ctx.template) for page in pages],
             lane=JobLane.EXCLUSIVE,
         )
         self.jobs.wait([job], timeout=self.settings.settings.adobe.script_timeout_seconds)
@@ -790,7 +777,8 @@ class Pipeline:
             )
         else:
             self.bus.publish(
-                EventType.LAYOUT_CORRECTED, slug=ctx.handle.slug,
+                EventType.LAYOUT_CORRECTED,
+                slug=ctx.handle.slug,
                 pages=[p.index for p in pages],
             )
 
@@ -851,9 +839,7 @@ class Pipeline:
                 log.debug("Closing the InDesign document failed: %s", exc)
 
     # ----------------------------------------------------------- approvals
-    def _approve(
-        self, ctx: PipelineContext, stage: PipelineStage, approval: ApprovalCallback | None
-    ) -> bool:
+    def _approve(self, ctx: PipelineContext, stage: PipelineStage, approval: ApprovalCallback | None) -> bool:
         """Ask for approval before the gated stages in semi-automatic mode."""
         if ctx.mode == "auto" or approval is None:
             return True
@@ -866,7 +852,9 @@ class Pipeline:
             payload=_approval_payload(ctx, stage),
         )
         self.bus.publish(
-            EventType.APPROVAL_REQUIRED, slug=ctx.handle.slug, stage=stage.value,
+            EventType.APPROVAL_REQUIRED,
+            slug=ctx.handle.slug,
+            stage=stage.value,
             title=request.title,
         )
         self._set_run_status(ctx, "awaiting_approval")
@@ -888,9 +876,7 @@ class Pipeline:
             run = uow.runs.get(ctx.run_id)
             if run is not None:
                 run.stage = stage.value
-        self.bus.publish(
-            EventType.PIPELINE_STAGE, slug=ctx.handle.slug, stage=stage.value, progress=fraction
-        )
+        self.bus.publish(EventType.PIPELINE_STAGE, slug=ctx.handle.slug, stage=stage.value, progress=fraction)
 
     def _record_stage(self, ctx: PipelineContext, stage: PipelineStage) -> None:
         with ctx.handle.uow() as uow:
@@ -905,24 +891,22 @@ class Pipeline:
             if run is not None:
                 run.status = status
 
-    def _finish_run(
-        self, ctx: PipelineContext, status: str, result: PipelineResult | None = None
-    ) -> None:
+    def _finish_run(self, ctx: PipelineContext, status: str, result: PipelineResult | None = None) -> None:
         with ctx.handle.uow() as uow:
             run = uow.runs.get(ctx.run_id)
             if run is None:
                 return
             run.status = status
-            run.finished_at = datetime.now(timezone.utc)
+            run.finished_at = datetime.now(UTC)
             run.score = ctx.plan.score if ctx.plan else 0.0
             run.set_result(result.model_dump(mode="json") if result else {})
             if ctx.errors:
                 run.error_json = E.JSONMixin.dump([e.to_dict() for e in ctx.errors])
             project = uow.projects.get(ctx.handle.project_id)
             if project is not None:
-                project.status = {
-                    "completed": "generated", "failed": "error", "cancelled": "draft"
-                }.get(status, project.status)
+                project.status = {"completed": "generated", "failed": "error", "cancelled": "draft"}.get(
+                    status, project.status
+                )
 
     def _populate_result(self, ctx: PipelineContext, result: PipelineResult) -> None:
         """Fill the result object from the context."""
@@ -974,8 +958,7 @@ def _approval_payload(ctx: PipelineContext, stage: PipelineStage) -> dict[str, A
     if ctx.plan:
         return {
             "pages": [
-                {"index": p.index, "score": p.score, "elements": len(p.elements)}
-                for p in ctx.plan.pages
+                {"index": p.index, "score": p.score, "elements": len(p.elements)} for p in ctx.plan.pages
             ]
         }
     return {}
@@ -1023,10 +1006,7 @@ def _caption_for(article: E.Article, asset: E.Asset) -> str:
     agency; the name of the file the copy was imported from is not a credit.
     """
     if asset.ai_generated:
-        return (
-            "تصویر تولیدشده با هوش مصنوعی" if article.language == "fa"
-            else "AI-generated illustration"
-        )
+        return "تصویر تولیدشده با هوش مصنوعی" if article.language == "fa" else "AI-generated illustration"
     source = (article.source or "").strip()
     if not source or Path(source).suffix or "/" in source or "\\" in source:
         return ""

@@ -133,9 +133,7 @@ class GeminiProvider(AIProvider):
             data = await self.client.post_json(self._path(model, "predict"), payload)
             predictions = data.get("predictions") or []
             if not predictions or not predictions[0].get("bytesBase64Encoded"):
-                raise ImageGenerationError(
-                    "Imagen returned no image", context={"response": str(data)[:400]}
-                )
+                raise ImageGenerationError("Imagen returned no image", context={"response": str(data)[:400]})
             target.write_bytes(base64.b64decode(predictions[0]["bytesBase64Encoded"]))
         else:
             payload = {

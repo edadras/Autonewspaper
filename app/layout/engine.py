@@ -190,9 +190,7 @@ class LayoutEngine:
         for strategy, variant, regions in build_candidates(
             grid, area, placed_blocks, allowed, self.candidates_per_page
         ):
-            page = self._compose(
-                index, grid, regions, master_elements, section, strategy, variant
-            )
+            page = self._compose(index, grid, regions, master_elements, section, strategy, variant)
             report = self.checker.check(page, asset_pixels=asset_pixels)
             score = self.scorer.score(page, report, asset_quality=asset_quality)
             page.score = score.total
@@ -232,7 +230,12 @@ class LayoutEngine:
         dropped_blocks = [b for b in placed_blocks if b.article_id in set(best.dropped_articles)]
         log.info(
             "Page %d: %s/%d selected with score %.1f (%d candidate(s), %d article(s))",
-            index, best.strategy, best.variant, best.score.total, len(candidates), best.placed_articles,
+            index,
+            best.strategy,
+            best.variant,
+            best.score.total,
+            len(candidates),
+            best.placed_articles,
         )
         return PagePlan(page=best.page, candidates=candidates, overflow=dropped_blocks + overflow)
 
@@ -299,9 +302,11 @@ class LayoutEngine:
                 meta={"master": master.name},
             )
             if element.is_text and text:
-                fit = self.typography.fit_display(text, rect, spec.type, max_lines=2) if spec.type in (
-                    ElementType.MASTHEAD,
-                ) else self.typography.fit(text, rect, spec.type)
+                fit = (
+                    self.typography.fit_display(text, rect, spec.type, max_lines=2)
+                    if spec.type in (ElementType.MASTHEAD,)
+                    else self.typography.fit(text, rect, spec.type)
+                )
                 element.typography = fit.typography
                 element.text = fit.text
                 element.estimated_overflow = fit.overflow
@@ -369,12 +374,19 @@ class LayoutEngine:
         if block.kicker:
             band = _take(self.typography.height_for(block.kicker, rect.width, ElementType.KICKER))
             if band:
-                elements.append(self._text_element(f"{prefix}_kicker", ElementType.KICKER, band, block, block.kicker))
+                elements.append(
+                    self._text_element(f"{prefix}_kicker", ElementType.KICKER, band, block, block.kicker)
+                )
 
         # --- headline -----------------------------------------------------
         headline_lines = {AreaKind.MAIN: 3, AreaKind.SECONDARY: 3, AreaKind.SMALL: 2, AreaKind.SIDEBAR: 2}
         max_lines = headline_lines.get(block.area, 2)
-        headline_share = {AreaKind.MAIN: 0.26, AreaKind.SECONDARY: 0.24, AreaKind.SMALL: 0.28, AreaKind.SIDEBAR: 0.26}
+        headline_share = {
+            AreaKind.MAIN: 0.26,
+            AreaKind.SECONDARY: 0.24,
+            AreaKind.SMALL: 0.28,
+            AreaKind.SIDEBAR: 0.26,
+        }
         headline_height = min(
             remaining * headline_share.get(block.area, 0.25),
             pt_to_mm(self.typography.style_spec(ElementType.HEADLINE).max_size_pt * 1.15) * max_lines,
@@ -403,7 +415,11 @@ class LayoutEngine:
                     style_id="headline",
                     typography=fit.typography,
                     estimated_overflow=fit.overflow,
-                    meta={"truncated": fit.truncated, "used_min_size": fit.used_min_size, "area": block.area.value},
+                    meta={
+                        "truncated": fit.truncated,
+                        "used_min_size": fit.used_min_size,
+                        "area": block.area.value,
+                    },
                 )
             )
 
@@ -456,9 +472,7 @@ class LayoutEngine:
                 )
                 caption = block.image.caption
                 if caption and remaining > 16:
-                    caption_band = _take(
-                        self.typography.height_for(caption, rect.width, ElementType.CAPTION)
-                    )
+                    caption_band = _take(self.typography.height_for(caption, rect.width, ElementType.CAPTION))
                     if caption_band:
                         elements.append(
                             self._text_element(
@@ -491,9 +505,7 @@ class LayoutEngine:
             available = max(0.0, rect.bottom - cursor)
             element_kind = ElementType.SIDEBAR if block.area is AreaKind.SIDEBAR else ElementType.BODY
             columns_probe = max(1, min(grid.columns_for_width(rect.width), 4))
-            needed = self.typography.height_for(
-                block.body, rect.width, element_kind, columns_probe
-            )
+            needed = self.typography.height_for(block.body, rect.width, element_kind, columns_probe)
             # A frame taller than its copy would hide the white space it leaves;
             # size it to the text (plus a little slack) so QA sees the gap.
             band = Rect(
@@ -554,9 +566,7 @@ class LayoutEngine:
             meta={"truncated": fit.truncated, "used_min_size": fit.used_min_size},
         )
 
-    def _empty_page(
-        self, index: int, section: str, publication_name: str, edition_date: str
-    ) -> PageLayout:
+    def _empty_page(self, index: int, section: str, publication_name: str, edition_date: str) -> PageLayout:
         """A page with only its master furniture."""
         top, bottom, left, right = self.template.margins_for(index)
         master = self.template.master_for(index)

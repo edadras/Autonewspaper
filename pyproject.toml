@@ -59,7 +59,12 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "W"]
-ignore = ["E501", "B008"]
+# E501  line length is handled by the formatter
+# B008  function calls in defaults are how pydantic Field() is used
+# UP042 the enums deliberately mix in `str` rather than using StrEnum: that
+#       keeps `str(Member)` and f-string interpolation identical across the
+#       versions this code targets, and every use goes through `.value`
+ignore = ["E501", "B008", "UP042"]
 
 [tool.mypy]
 python_version = "3.11"

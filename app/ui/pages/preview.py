@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 
 from app.models.schemas import LayoutPlan
 from app.ui.pages.base import Page
-from app.ui.widgets.common import Card, DataTable, ImageCanvas, Toolbar, run_guarded
+from app.ui.widgets.common import DataTable, ImageCanvas, Toolbar, run_guarded
 from app.vision.renderer import PreviewRenderer
 
 log = logging.getLogger(__name__)
@@ -136,8 +136,7 @@ class PreviewPage(Page):
         )
         if qa_meta:
             self.caption.setText(
-                self.caption.text()
-                + f" - analysed by {', '.join(qa_meta.get('analyzed_by', []))}"
+                self.caption.text() + f" - analysed by {', '.join(qa_meta.get('analyzed_by', []))}"
             )
 
     def _find_preview(self, page_index: int) -> Path | None:
@@ -171,9 +170,7 @@ class PreviewPage(Page):
 
         def action() -> None:
             template = self.app.templates.get_or_default(self.plan.template_id)
-            renderer = PreviewRenderer(
-                template, dpi=self.app.settings.settings.export.preview_dpi
-            )
+            renderer = PreviewRenderer(template, dpi=self.app.settings.settings.export.preview_dpi)
             results = renderer.render_plan(self.plan, self.handle.previews_dir, prefix="preview_page")
             self.caption.setText(f"Rendered {len(results)} page(s).")
             self._show_page(self.page_list.currentRow())

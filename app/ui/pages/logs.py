@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QTextCursor
+from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -96,9 +96,7 @@ class LogsPage(Page):
     def _reload(self) -> None:
         level = self.level_box.currentText()
         needle = self.filter_edit.text().strip()
-        records = get_buffer().records(
-            None if level == "ALL" else level, needle or None
-        )
+        records = get_buffer().records(None if level == "ALL" else level, needle or None)
         self.view.clear()
         for record in records[-3000:]:
             self._write(record)
@@ -110,7 +108,11 @@ class LogsPage(Page):
             if not (level == "INFO" and record.get("level") in ("WARNING", "ERROR", "CRITICAL")):
                 return
         needle = self.filter_edit.text().strip().lower()
-        if needle and needle not in record.get("message", "").lower() and needle not in record.get("logger", "").lower():
+        if (
+            needle
+            and needle not in record.get("message", "").lower()
+            and needle not in record.get("logger", "").lower()
+        ):
             return
         self._write(record)
         if self.follow_check.isChecked():
@@ -168,6 +170,4 @@ class LogsPage(Page):
 
 def _escape(text: str) -> str:
     """Escape a log message so it is safe inside the rich-text view."""
-    return (
-        text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", " ⏎ ")
-    )
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", " ⏎ ")

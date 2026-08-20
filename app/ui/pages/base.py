@@ -28,9 +28,7 @@ class Page(QWidget):
     subtitle = ""
     icon = "•"
 
-    def __init__(
-        self, application: Application, bridge: EventBridge, parent: QWidget | None = None
-    ) -> None:
+    def __init__(self, application: Application, bridge: EventBridge, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.app = application
         self.bridge = bridge

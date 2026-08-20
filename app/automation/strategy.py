@@ -117,9 +117,7 @@ class OperationRouter:
         name: str = "",
     ) -> OperationRouter:
         """Register a handler for *tier*."""
-        self.handlers.append(
-            Handler(tier=tier, run=run, can_run=can_run or (lambda: True), name=name)
-        )
+        self.handlers.append(Handler(tier=tier, run=run, can_run=can_run or (lambda: True), name=name))
         self.handlers.sort(key=lambda h: h.tier)
         return self
 
@@ -142,16 +140,15 @@ class OperationRouter:
             except Exception as exc:  # noqa: BLE001 - degrade to the next tier
                 duration = time.monotonic() - started
                 attempts.append(Attempt(handler.tier, False, str(exc)[:300], duration))
-                log.warning(
-                    "%s via %s failed: %s", self.operation, handler.label(), str(exc)[:200]
-                )
+                log.warning("%s via %s failed: %s", self.operation, handler.label(), str(exc)[:200])
                 continue
             duration = time.monotonic() - started
             attempts.append(Attempt(handler.tier, True, "", duration))
             if handler.tier > Tier.SCRIPTING_API:
                 log.warning(
                     "%s completed through the fallback mechanism '%s'",
-                    self.operation, handler.label(),
+                    self.operation,
+                    handler.label(),
                 )
             return OperationOutcome(value=value, tier=handler.tier, attempts=attempts)
 

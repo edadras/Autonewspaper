@@ -149,9 +149,7 @@ def article_blocks(template):
             area=area,
             priority=95 - index * 12,
             image=(
-                make_image_slot(index + 1, "/tmp/does-not-exist.jpg", 2000, 1200, 82.0)
-                if index < 2
-                else None
+                make_image_slot(index + 1, "/tmp/does-not-exist.jpg", 2000, 1200, 82.0) if index < 2 else None
             ),
         )
         for index, area in enumerate(areas)

@@ -13,9 +13,10 @@ import io
 import json
 import logging
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from app.core.errors import ContentImportError
 from app.core.events import EventBus, EventType
@@ -253,14 +254,8 @@ class ContentManager:
             heading = container.find(["h1", "h2"])
             title = heading.get_text(" ", strip=True) if heading else ""
             deck = container.find(["h2", "h3"]) if heading else None
-            subtitle = (
-                deck.get_text(" ", strip=True)
-                if deck is not None and deck is not heading
-                else ""
-            )
-            paragraphs = [
-                p.get_text(" ", strip=True) for p in container.find_all("p")
-            ]
+            subtitle = deck.get_text(" ", strip=True) if deck is not None and deck is not heading else ""
+            paragraphs = [p.get_text(" ", strip=True) for p in container.find_all("p")]
             body = "\n".join(p for p in paragraphs if p)
             if not (title or body):
                 continue
@@ -308,6 +303,7 @@ class ContentManager:
 
     def _from_mapping(self, item: dict[str, Any], source: str) -> ParsedArticle:
         """Build an article from a dictionary with flexible key names."""
+
         def pick(*names: str, default: str = "") -> str:
             for name in names:
                 for key in (name, name.title(), name.upper()):
@@ -359,9 +355,7 @@ class ContentManager:
         self._emit(EventType.CONTENT_IMPORTED, slug=handle.slug, **result.to_dict())
         return result
 
-    def import_text(
-        self, handle: ProjectHandle, raw: str, *, source: str = "clipboard"
-    ) -> ImportResult:
+    def import_text(self, handle: ProjectHandle, raw: str, *, source: str = "clipboard") -> ImportResult:
         """Import pasted text (specification §21: clipboard support)."""
         result = ImportResult()
         try:
@@ -419,10 +413,27 @@ class ContentManager:
     def update_article(self, handle: ProjectHandle, article_id: int, **fields: Any) -> dict[str, Any]:
         """Apply a manual edit to one article (specification §25)."""
         allowed = {
-            "title", "subtitle", "lead", "body", "summary", "category", "author", "source",
-            "importance", "urgency", "public_interest", "visual_importance", "priority",
-            "page_preference", "recommended_page", "recommended_area",
-            "image_required", "ai_image_required", "approved", "status", "order_index",
+            "title",
+            "subtitle",
+            "lead",
+            "body",
+            "summary",
+            "category",
+            "author",
+            "source",
+            "importance",
+            "urgency",
+            "public_interest",
+            "visual_importance",
+            "priority",
+            "page_preference",
+            "recommended_page",
+            "recommended_area",
+            "image_required",
+            "ai_image_required",
+            "approved",
+            "status",
+            "order_index",
         }
         unknown = set(fields) - allowed
         if unknown:

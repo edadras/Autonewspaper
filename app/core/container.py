@@ -41,9 +41,7 @@ class ServiceContainer:
             self._instances[self._key(token)] = instance
         return instance
 
-    def register_factory(
-        self, token: type[T] | str, factory: Callable[[ServiceContainer], T]
-    ) -> None:
+    def register_factory(self, token: type[T] | str, factory: Callable[[ServiceContainer], T]) -> None:
         """Register a lazy *factory* for *token*."""
         with self._lock:
             self._factories[self._key(token)] = factory

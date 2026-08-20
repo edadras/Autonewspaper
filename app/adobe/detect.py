@@ -22,9 +22,10 @@ import os
 import re
 import shutil
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -168,8 +169,10 @@ def _from_uninstall_registry(display_name: str, exe_name: str) -> tuple[Path | N
                 continue
             location = _read_registry_value(root, f"{base}\\{entry}", "InstallLocation") or ""
             version_match = _VERSION_RE.search(name)
-            version = version_match.group(1) if version_match else (
-                _read_registry_value(root, f"{base}\\{entry}", "DisplayVersion") or ""
+            version = (
+                version_match.group(1)
+                if version_match
+                else (_read_registry_value(root, f"{base}\\{entry}", "DisplayVersion") or "")
             )
             if location:
                 executable = Path(location) / exe_name
@@ -187,9 +190,7 @@ def _from_prog_ids(prog_ids: Iterable[str]) -> tuple[str, str]:
     for prog_id in prog_ids:
         clsid = _read_registry_value(winreg.HKEY_CLASSES_ROOT, f"{prog_id}\\CLSID", "")
         if clsid:
-            server = _read_registry_value(
-                winreg.HKEY_CLASSES_ROOT, f"CLSID\\{clsid}\\LocalServer32", ""
-            )
+            server = _read_registry_value(winreg.HKEY_CLASSES_ROOT, f"CLSID\\{clsid}\\LocalServer32", "")
             return (prog_id, (server or "").strip('"').split('" ')[0])
     return ("", "")
 
@@ -361,9 +362,7 @@ def detect_photoshop(configured_path: str | None = None) -> AdobeApp:
     return detect_app("photoshop", configured_path=configured_path)
 
 
-def detect_all(
-    indesign_path: str | None = None, photoshop_path: str | None = None
-) -> dict[str, AdobeApp]:
+def detect_all(indesign_path: str | None = None, photoshop_path: str | None = None) -> dict[str, AdobeApp]:
     """Detect both applications in one call."""
     return {
         "indesign": detect_indesign(indesign_path),

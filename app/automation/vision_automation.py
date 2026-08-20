@@ -55,8 +55,12 @@ class Match:
     def to_dict(self) -> dict[str, Any]:
         """JSON-friendly form."""
         return {
-            "x": self.x, "y": self.y, "width": self.width, "height": self.height,
-            "confidence": round(self.confidence, 4), "center": self.center,
+            "x": self.x,
+            "y": self.y,
+            "width": self.width,
+            "height": self.height,
+            "confidence": round(self.confidence, 4),
+            "center": self.center,
         }
 
 
@@ -79,9 +83,7 @@ def grab_screen(region: tuple[int, int, int, int] | None = None) -> Image.Image:
             ) from exc2
 
 
-def match_template(
-    screen: Image.Image, template: Image.Image, threshold: float = 0.86
-) -> Match | None:
+def match_template(screen: Image.Image, template: Image.Image, threshold: float = 0.86) -> Match | None:
     """Locate *template* inside *screen*; returns ``None`` below *threshold*."""
     if template.width > screen.width or template.height > screen.height:
         return None
@@ -202,9 +204,7 @@ class VisionAutomation:
         log.warning("Clicked '%s' at (%d, %d) with confidence %.2f", name, x, y, match.confidence)
         return True
 
-    def wait_for(
-        self, name: str, timeout: float = 30.0, interval: float = 1.0
-    ) -> Match | None:
+    def wait_for(self, name: str, timeout: float = 30.0, interval: float = 1.0) -> Match | None:
         """Wait until a control appears on screen."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:

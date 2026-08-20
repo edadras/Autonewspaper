@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 
 import pytest
 
@@ -32,8 +31,11 @@ from app.layout.engine import LayoutEngine
 def page(template, article_blocks):
     engine = LayoutEngine(template, candidates_per_page=4)
     plan = engine.plan_edition(
-        1, {1: article_blocks}, page_count=1,
-        publication_name="روزنامه صبح", edition_date="1405/05/29",
+        1,
+        {1: article_blocks},
+        page_count=1,
+        publication_name="روزنامه صبح",
+        edition_date="1405/05/29",
     )
     return plan.pages[0]
 
@@ -99,9 +101,7 @@ def test_document_script_carries_every_page_and_style(page, template):
 
 def test_page_geometry_survives_the_round_trip(page, template):
     script = build_page_script(page, template)
-    payload = json.loads(
-        re.search(r"var __page = (\{.*?\});\n", script.render(), re.DOTALL).group(1)
-    )
+    payload = json.loads(re.search(r"var __page = (\{.*?\});\n", script.render(), re.DOTALL).group(1))
     by_name = {element["id"]: element for element in payload["elements"]}
     for element in page.elements:
         serialised = by_name[element.frame_name]
@@ -149,7 +149,7 @@ def test_builder_rejects_an_unknown_host():
     [
         ('{"ok": true, "data": {"pages": 2}, "log": []}', True),
         ('{"ok": false, "error": {"message": "boom"}}', False),
-        ("noise {\"ok\": true, \"data\": 1} trailing", True),
+        ('noise {"ok": true, "data": 1} trailing', True),
         ("", False),
         ("not json at all", False),
     ],
@@ -206,9 +206,7 @@ def test_queue_strategy_round_trips_a_job_file(tmp_path):
         while time.monotonic() < deadline:
             for job in strategy.queue_dir.glob("*.job.jsx"):
                 result = job.with_name(job.name.replace(".job.jsx", ".result.json"))
-                result.write_text(
-                    '{"ok": true, "data": {"pages": 3}, "log": ["built"]}', encoding="utf-8"
-                )
+                result.write_text('{"ok": true, "data": {"pages": 3}, "log": ["built"]}', encoding="utf-8")
                 job.unlink()
                 return
             time.sleep(0.05)

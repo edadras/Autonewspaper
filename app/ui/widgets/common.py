@@ -258,9 +258,7 @@ class DataTable(QTableWidget):
                 item = QTableWidgetItem("" if value is None else str(value))
                 if isinstance(value, int | float) and not isinstance(value, bool):
                     item.setData(Qt.ItemDataRole.EditRole, value)
-                    item.setTextAlignment(
-                        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-                    )
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 if column == 0 and user_data is not None and row_index < len(user_data):
                     item.setData(Qt.ItemDataRole.UserRole, user_data[row_index])
                 self.setItem(row_index, column, item)
@@ -315,7 +313,9 @@ def confirm(parent: QWidget, title: str, message: str) -> bool:
     from PySide6.QtWidgets import QMessageBox
 
     answer = QMessageBox.question(
-        parent, title, message,
+        parent,
+        title,
+        message,
         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         QMessageBox.StandardButton.No,
     )

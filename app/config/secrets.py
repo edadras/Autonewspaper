@@ -160,7 +160,7 @@ class SecretStore:
             else:
                 nonce, payload = raw[:16], raw[16:]
                 plain = bytes(
-                    a ^ b for a, b in zip(payload, _stream(_machine_key(), nonce, len(payload)))
+                    a ^ b for a, b in zip(payload, _stream(_machine_key(), nonce, len(payload)), strict=True)
                 )
             return json.loads(plain.decode("utf-8"))
         except Exception as exc:
@@ -174,7 +174,9 @@ class SecretStore:
             blob = win32crypt.CryptProtectData(plain, SERVICE_NAME, None, None, None, 0)  # type: ignore[union-attr]
         else:
             nonce = os.urandom(16)
-            blob = nonce + bytes(a ^ b for a, b in zip(plain, _stream(_machine_key(), nonce, len(plain))))
+            blob = nonce + bytes(
+                a ^ b for a, b in zip(plain, _stream(_machine_key(), nonce, len(plain)), strict=True)
+            )
         tmp = self.vault_path.with_suffix(".tmp")
         tmp.write_bytes(blob)
         tmp.replace(self.vault_path)

@@ -23,7 +23,7 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Generic, TypeVar
 
@@ -114,7 +114,7 @@ class Job(Generic[T]):
     message: str = ""
     result: Any = None
     error: ErrorReport | None = None
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     started_at: datetime | None = None
     finished_at: datetime | None = None
     token: CancelToken = field(default_factory=CancelToken)
@@ -125,7 +125,7 @@ class Job(Generic[T]):
         """Elapsed seconds (running or final)."""
         if not self.started_at:
             return 0.0
-        end = self.finished_at or datetime.now(timezone.utc)
+        end = self.finished_at or datetime.now(UTC)
         return (end - self.started_at).total_seconds()
 
     def cancel(self) -> None:
@@ -182,9 +182,7 @@ class JobQueue:
         """Queue *func* and return the :class:`Job` handle immediately."""
         if self._closed:
             raise RuntimeError("JobQueue is closed")
-        job: Job[T] = Job(
-            name=name, func=func, lane=lane, priority=priority, metadata=metadata or {}
-        )
+        job: Job[T] = Job(name=name, func=func, lane=lane, priority=priority, metadata=metadata or {})
         with self._lock:
             self._jobs[job.job_id] = job
         self.bus.publish(EventType.JOB_QUEUED, job=job.to_dict())
@@ -219,7 +217,7 @@ class JobQueue:
     def _run(self, job: Job[Any]) -> Any:
         if job.token.cancelled:
             job.state = JobState.CANCELLED
-            job.finished_at = datetime.now(timezone.utc)
+            job.finished_at = datetime.now(UTC)
             self.bus.publish(EventType.JOB_FINISHED, job=job.to_dict())
             return None
 
@@ -235,7 +233,7 @@ class JobQueue:
                 self._exclusive_lock.acquire()
                 acquired = True
             job.state = JobState.RUNNING
-            job.started_at = datetime.now(timezone.utc)
+            job.started_at = datetime.now(UTC)
             self.bus.publish(EventType.JOB_STARTED, job=job.to_dict())
             result = job.func(ctx)
             job.result = result
@@ -256,7 +254,7 @@ class JobQueue:
             self.bus.publish(EventType.ERROR, error=job.error.to_dict())
             return None
         finally:
-            job.finished_at = datetime.now(timezone.utc)
+            job.finished_at = datetime.now(UTC)
             if acquired:
                 self._exclusive_lock.release()
 

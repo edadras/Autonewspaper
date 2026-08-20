@@ -34,66 +34,240 @@ log = logging.getLogger(__name__)
 # --- news-value lexicon -----------------------------------------------------
 # Weights are additive contributions to the 0..100 importance score.
 URGENCY_TERMS = {
-    "فوری": 30, "اضطراری": 28, "لحظاتی پیش": 22, "هم‌اکنون": 20, "زنده": 16,
-    "breaking": 30, "urgent": 26, "live": 16, "just in": 22,
+    "فوری": 30,
+    "اضطراری": 28,
+    "لحظاتی پیش": 22,
+    "هم‌اکنون": 20,
+    "زنده": 16,
+    "breaking": 30,
+    "urgent": 26,
+    "live": 16,
+    "just in": 22,
 }
 IMPACT_TERMS = {
-    "زلزله": 30, "سیل": 28, "جنگ": 30, "حمله": 26, "انفجار": 28, "بحران": 22,
-    "تحریم": 20, "انتخابات": 24, "دولت": 14, "مجلس": 14, "رئیس‌جمهور": 20,
-    "وزیر": 12, "بودجه": 14, "تورم": 18, "ارز": 14, "بورس": 12, "کرونا": 18,
-    "قتل": 20, "تصادف": 14, "آتش‌سوزی": 20, "اعتصاب": 16, "توافق": 14,
-    "earthquake": 30, "flood": 28, "war": 30, "attack": 26, "explosion": 28,
-    "crisis": 22, "election": 24, "government": 14, "president": 20,
-    "inflation": 18, "sanction": 20, "strike": 16, "agreement": 14, "pandemic": 18,
+    "زلزله": 30,
+    "سیل": 28,
+    "جنگ": 30,
+    "حمله": 26,
+    "انفجار": 28,
+    "بحران": 22,
+    "تحریم": 20,
+    "انتخابات": 24,
+    "دولت": 14,
+    "مجلس": 14,
+    "رئیس‌جمهور": 20,
+    "وزیر": 12,
+    "بودجه": 14,
+    "تورم": 18,
+    "ارز": 14,
+    "بورس": 12,
+    "کرونا": 18,
+    "قتل": 20,
+    "تصادف": 14,
+    "آتش‌سوزی": 20,
+    "اعتصاب": 16,
+    "توافق": 14,
+    "earthquake": 30,
+    "flood": 28,
+    "war": 30,
+    "attack": 26,
+    "explosion": 28,
+    "crisis": 22,
+    "election": 24,
+    "government": 14,
+    "president": 20,
+    "inflation": 18,
+    "sanction": 20,
+    "strike": 16,
+    "agreement": 14,
+    "pandemic": 18,
 }
 HUMAN_INTEREST_TERMS = {
-    "مردم": 12, "خانواده": 10, "کودکان": 14, "دانش‌آموزان": 12, "بیمار": 12,
-    "کارگر": 10, "معلم": 10, "شهروندان": 10, "زندگی": 8,
-    "people": 12, "family": 10, "children": 14, "students": 12, "patients": 12,
+    "مردم": 12,
+    "خانواده": 10,
+    "کودکان": 14,
+    "دانش‌آموزان": 12,
+    "بیمار": 12,
+    "کارگر": 10,
+    "معلم": 10,
+    "شهروندان": 10,
+    "زندگی": 8,
+    "people": 12,
+    "family": 10,
+    "children": 14,
+    "students": 12,
+    "patients": 12,
 }
 VISUAL_TERMS = {
-    "تصویر": 14, "عکس": 14, "مراسم": 12, "جشنواره": 14, "نمایشگاه": 14,
-    "مسابقه": 12, "بازی": 12, "افتتاح": 10, "راهپیمایی": 14, "تخریب": 14,
-    "ceremony": 12, "festival": 14, "exhibition": 14, "match": 12, "parade": 14,
+    "تصویر": 14,
+    "عکس": 14,
+    "مراسم": 12,
+    "جشنواره": 14,
+    "نمایشگاه": 14,
+    "مسابقه": 12,
+    "بازی": 12,
+    "افتتاح": 10,
+    "راهپیمایی": 14,
+    "تخریب": 14,
+    "ceremony": 12,
+    "festival": 14,
+    "exhibition": 14,
+    "match": 12,
+    "parade": 14,
 }
 
 CATEGORY_LEXICON: dict[str, set[str]] = {
     "politics": {
-        "دولت", "مجلس", "انتخابات", "رئیس‌جمهور", "وزیر", "سیاست", "نماینده", "حزب",
-        "قانون", "تحریم", "دیپلماسی", "مذاکره", "government", "election", "parliament",
-        "policy", "minister", "diplomacy", "sanction",
+        "دولت",
+        "مجلس",
+        "انتخابات",
+        "رئیس‌جمهور",
+        "وزیر",
+        "سیاست",
+        "نماینده",
+        "حزب",
+        "قانون",
+        "تحریم",
+        "دیپلماسی",
+        "مذاکره",
+        "government",
+        "election",
+        "parliament",
+        "policy",
+        "minister",
+        "diplomacy",
+        "sanction",
     },
     "economy": {
-        "اقتصاد", "بورس", "ارز", "دلار", "تورم", "بازار", "بانک", "قیمت", "بودجه",
-        "صادرات", "واردات", "تولید", "مالیات", "economy", "market", "inflation",
-        "bank", "budget", "export", "import", "tax", "price",
+        "اقتصاد",
+        "بورس",
+        "ارز",
+        "دلار",
+        "تورم",
+        "بازار",
+        "بانک",
+        "قیمت",
+        "بودجه",
+        "صادرات",
+        "واردات",
+        "تولید",
+        "مالیات",
+        "economy",
+        "market",
+        "inflation",
+        "bank",
+        "budget",
+        "export",
+        "import",
+        "tax",
+        "price",
     },
     "sport": {
-        "فوتبال", "تیم", "بازیکن", "مسابقه", "لیگ", "قهرمانی", "ورزش", "المپیک",
-        "استقلال", "پرسپولیس", "گل", "football", "team", "league", "match",
-        "championship", "olympic", "player",
+        "فوتبال",
+        "تیم",
+        "بازیکن",
+        "مسابقه",
+        "لیگ",
+        "قهرمانی",
+        "ورزش",
+        "المپیک",
+        "استقلال",
+        "پرسپولیس",
+        "گل",
+        "football",
+        "team",
+        "league",
+        "match",
+        "championship",
+        "olympic",
+        "player",
     },
     "culture": {
-        "فرهنگ", "هنر", "سینما", "فیلم", "کتاب", "موسیقی", "تئاتر", "نمایشگاه",
-        "جشنواره", "نویسنده", "culture", "art", "cinema", "film", "book", "music",
-        "theatre", "festival",
+        "فرهنگ",
+        "هنر",
+        "سینما",
+        "فیلم",
+        "کتاب",
+        "موسیقی",
+        "تئاتر",
+        "نمایشگاه",
+        "جشنواره",
+        "نویسنده",
+        "culture",
+        "art",
+        "cinema",
+        "film",
+        "book",
+        "music",
+        "theatre",
+        "festival",
     },
     "society": {
-        "جامعه", "شهروندان", "شهرداری", "ترافیک", "آموزش", "مدرسه", "دانشگاه",
-        "بهداشت", "بیمارستان", "محیط زیست", "society", "city", "traffic",
-        "education", "school", "university", "health", "environment",
+        "جامعه",
+        "شهروندان",
+        "شهرداری",
+        "ترافیک",
+        "آموزش",
+        "مدرسه",
+        "دانشگاه",
+        "بهداشت",
+        "بیمارستان",
+        "محیط زیست",
+        "society",
+        "city",
+        "traffic",
+        "education",
+        "school",
+        "university",
+        "health",
+        "environment",
     },
     "world": {
-        "جهان", "بین‌الملل", "آمریکا", "اروپا", "چین", "روسیه", "سازمان ملل",
-        "world", "international", "global", "europe", "china", "russia", "united nations",
+        "جهان",
+        "بین‌الملل",
+        "آمریکا",
+        "اروپا",
+        "چین",
+        "روسیه",
+        "سازمان ملل",
+        "world",
+        "international",
+        "global",
+        "europe",
+        "china",
+        "russia",
+        "united nations",
     },
     "science": {
-        "علم", "فناوری", "پژوهش", "دانشمند", "هوش مصنوعی", "فضا", "ناسا",
-        "science", "technology", "research", "artificial intelligence", "space", "nasa",
+        "علم",
+        "فناوری",
+        "پژوهش",
+        "دانشمند",
+        "هوش مصنوعی",
+        "فضا",
+        "ناسا",
+        "science",
+        "technology",
+        "research",
+        "artificial intelligence",
+        "space",
+        "nasa",
     },
     "incident": {
-        "حادثه", "تصادف", "آتش‌سوزی", "زلزله", "سیل", "انفجار", "قتل", "سرقت",
-        "accident", "fire", "earthquake", "flood", "explosion", "crime",
+        "حادثه",
+        "تصادف",
+        "آتش‌سوزی",
+        "زلزله",
+        "سیل",
+        "انفجار",
+        "قتل",
+        "سرقت",
+        "accident",
+        "fire",
+        "earthquake",
+        "flood",
+        "explosion",
+        "crime",
     },
 }
 
@@ -219,8 +393,7 @@ class HeuristicProvider(AIProvider):
             "recommended_page": 1,
             "recommended_area": "secondary",
             "rationale": (
-                f"impact={impact} urgency={urgency} interest={interest} "
-                f"visual={visual} words={words}"
+                f"impact={impact} urgency={urgency} interest={interest} visual={visual} words={words}"
             ),
         }
 
@@ -283,9 +456,7 @@ class HeuristicProvider(AIProvider):
             f"35mm lens, shallow depth of field, no text, no watermark, no logo."
         )
 
-    def _assign_pages(
-        self, analyses: list[dict[str, Any]], page_count: int
-    ) -> dict[int, list[int]]:
+    def _assign_pages(self, analyses: list[dict[str, Any]], page_count: int) -> dict[int, list[int]]:
         """Distribute stories over the edition.
 
         Explicit page preferences win. The front page is then filled from the
@@ -323,16 +494,18 @@ class HeuristicProvider(AIProvider):
 
         for analysis in remaining:
             category = analysis["category"]
-            options = [p for p in pages if p > 1 and len(pages[p]) < capacity[p]] or [
-                p for p in pages if p > 1
-            ] or [1]
+            options = (
+                [p for p in pages if p > 1 and len(pages[p]) < capacity[p]]
+                or [p for p in pages if p > 1]
+                or [1]
+            )
             preferred = category_pages.get(category)
 
-            def cost(page_index: int) -> tuple[float, int]:
+            def cost(page_index: int, _preferred: int | None = preferred) -> tuple[float, int]:
                 penalty = load[page_index]
-                if preferred == page_index:
+                if _preferred == page_index:
                     penalty -= 1.2
-                elif preferred is None and not pages[page_index]:
+                elif _preferred is None and not pages[page_index]:
                     penalty -= 0.4
                 return (penalty, page_index)
 
@@ -400,9 +573,7 @@ class HeuristicProvider(AIProvider):
             "slots": [
                 {
                     "article_id": article.get("id"),
-                    "weight": round(
-                        max(0.08, (article.get("priority", 50) / 100.0) / total * 3.2), 3
-                    ),
+                    "weight": round(max(0.08, (article.get("priority", 50) / 100.0) / total * 3.2), 3),
                     "area": "main" if index == 0 else ("secondary" if index < 3 else "small"),
                 }
                 for index, article in enumerate(articles)
@@ -416,9 +587,7 @@ class HeuristicProvider(AIProvider):
         return {
             "score": float(data.get("score", 0.0)),
             "issues": issues,
-            "comments": [
-                f"{key}={value}" for key, value in sorted(metrics.items())
-            ],
+            "comments": [f"{key}={value}" for key, value in sorted(metrics.items())],
         }
 
     # ----------------------------------------------------------- vision ---
@@ -446,9 +615,7 @@ class HeuristicProvider(AIProvider):
                 }
             )
         payload = {
-            "score": round(
-                sum(f["quality_score"] for f in findings) / len(findings), 2
-            ) if findings else 0.0,
+            "score": round(sum(f["quality_score"] for f in findings) / len(findings), 2) if findings else 0.0,
             "issues": [],
             "images": findings,
             "note": "Measured with the local image analyser; no vision model configured.",

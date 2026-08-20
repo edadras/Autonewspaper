@@ -25,7 +25,7 @@ from app.core.undo import Command
 from app.layout.engine import LayoutEngine
 from app.models.schemas import LayoutPlan, Rect
 from app.ui.pages.base import Page
-from app.ui.widgets.common import Card, ImageCanvas, Toolbar, run_guarded, show_error
+from app.ui.widgets.common import ImageCanvas, Toolbar, run_guarded, show_error
 from app.vision.renderer import PreviewRenderer
 
 log = logging.getLogger(__name__)
@@ -94,7 +94,10 @@ class LayoutPage(Page):
         self.w_spin = QDoubleSpinBox()
         self.h_spin = QDoubleSpinBox()
         for spin, maximum in (
-            (self.x_spin, 2000), (self.y_spin, 2000), (self.w_spin, 2000), (self.h_spin, 2000)
+            (self.x_spin, 2000),
+            (self.y_spin, 2000),
+            (self.w_spin, 2000),
+            (self.h_spin, 2000),
         ):
             spin.setRange(0.0, float(maximum))
             spin.setDecimals(2)
@@ -130,9 +133,7 @@ class LayoutPage(Page):
         self.tree.clear()
         if handle is None or not handle.layout_plan_path.exists():
             self.plan = None
-            self.status.setText(
-                "No layout plan yet. Run 'Generate Newspaper' on the Dashboard first."
-            )
+            self.status.setText("No layout plan yet. Run 'Generate Newspaper' on the Dashboard first.")
             self.canvas.clear("No plan")
             return
 
@@ -140,9 +141,7 @@ class LayoutPage(Page):
             self.plan = LayoutPlan.load(handle.layout_plan_path)
             template = self.app.templates.get_or_default(self.plan.template_id)
             self._engine = LayoutEngine(template, language=self.plan.language)
-            self._renderer = PreviewRenderer(
-                template, dpi=self.app.settings.settings.export.preview_dpi
-            )
+            self._renderer = PreviewRenderer(template, dpi=self.app.settings.settings.export.preview_dpi)
             self.style_box.clear()
             self.style_box.addItems([style.id for style in template.paragraph_styles])
             self._fill_tree()
@@ -164,7 +163,10 @@ class LayoutPage(Page):
                     + (f"  ({page.section})" if page.section else "")
                     + ("  [empty]" if page.meta.get("empty") else ""),
                     page.meta.get("strategy", ""),
-                    "", "", "", "",
+                    "",
+                    "",
+                    "",
+                    "",
                     "",
                     f"score {page.score:.1f} / QA {page.qa_score:.1f}",
                 ]
@@ -223,8 +225,16 @@ class LayoutPage(Page):
         if index >= 0:
             self.style_box.setCurrentIndex(index)
         self.text_edit.setPlainText(element.text)
-        for widget in (self.x_spin, self.y_spin, self.w_spin, self.h_spin, self.apply_button,
-                       self.delete_button, self.text_edit, self.size_spin):
+        for widget in (
+            self.x_spin,
+            self.y_spin,
+            self.w_spin,
+            self.h_spin,
+            self.apply_button,
+            self.delete_button,
+            self.text_edit,
+            self.size_spin,
+        ):
             widget.setEnabled(not element.locked)
 
     # --------------------------------------------------------------- edits
@@ -244,8 +254,10 @@ class LayoutPage(Page):
         before_text = element.text
         before_size = element.typography.size_pt if element.typography else None
         new_rect = Rect(
-            x=self.x_spin.value(), y=self.y_spin.value(),
-            width=self.w_spin.value(), height=self.h_spin.value(),
+            x=self.x_spin.value(),
+            y=self.y_spin.value(),
+            width=self.w_spin.value(),
+            height=self.h_spin.value(),
         )
         if not page.page_rect.contains(new_rect, tolerance=0.5):
             show_error(self, "Move frame", "The frame would fall outside the page.")

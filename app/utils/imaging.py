@@ -54,9 +54,7 @@ def _sharpness(image: Image.Image) -> float:
     """Edge-energy based sharpness score (variance of the edge response)."""
     grey = image.convert("L")
     grey.thumbnail((640, 640))
-    edges = grey.filter(
-        ImageFilter.Kernel((3, 3), [0, -1, 0, -1, 4, -1, 0, -1, 0], scale=1, offset=128)
-    )
+    edges = grey.filter(ImageFilter.Kernel((3, 3), [0, -1, 0, -1, 4, -1, 0, -1, 0], scale=1, offset=128))
     stat = ImageStat.Stat(edges)
     return round(float(stat.stddev[0]) ** 2 / 10.0, 3)
 

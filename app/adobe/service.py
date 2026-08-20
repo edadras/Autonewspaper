@@ -18,7 +18,7 @@ from app.adobe.indesign.controller import InDesignController
 from app.adobe.photoshop.controller import PhotoshopController
 from app.config.settings import SettingsManager
 from app.core.events import EventBus
-from app.utils.files import free_space_bytes, is_writable, human_size
+from app.utils.files import free_space_bytes, human_size, is_writable
 
 log = logging.getLogger(__name__)
 
@@ -137,7 +137,9 @@ class AdobeService:
         self.settings.update(
             adobe={
                 "indesign_path": str(self.indesign_app.executable) if self.indesign_app.executable else None,
-                "photoshop_path": str(self.photoshop_app.executable) if self.photoshop_app.executable else None,
+                "photoshop_path": str(self.photoshop_app.executable)
+                if self.photoshop_app.executable
+                else None,
                 "indesign_version": self.indesign_app.version or None,
                 "photoshop_version": self.photoshop_app.version or None,
             }
@@ -181,9 +183,7 @@ class AdobeService:
         target = Path(output_dir or self.settings.output_dir())
         writable = is_writable(target)
         free = free_space_bytes(target if target.exists() else target.parent)
-        report.checks.append(
-            HealthCheck("Output directory writable", writable, str(target), critical=True)
-        )
+        report.checks.append(HealthCheck("Output directory writable", writable, str(target), critical=True))
         report.checks.append(
             HealthCheck(
                 "Free disk space",

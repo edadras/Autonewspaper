@@ -87,7 +87,9 @@ class ConstraintChecker:
         self.rules = template.layout_rules
         self.overlap_tolerance = overlap_tolerance
 
-    def check(self, page: PageLayout, *, asset_pixels: dict[int, tuple[int, int]] | None = None) -> ConstraintReport:
+    def check(
+        self, page: PageLayout, *, asset_pixels: dict[int, tuple[int, int]] | None = None
+    ) -> ConstraintReport:
         """Run every constraint against *page*."""
         report = ConstraintReport(page_index=page.index)
         content = page.content_rect
@@ -143,8 +145,10 @@ class ConstraintChecker:
             # heads) legitimately sit in the margin; running text may not.
             if element.is_text and not element.locked and not content.contains(rect, tolerance=0.6):
                 intrusion = max(
-                    content.x - rect.x, rect.right - content.right,
-                    content.y - rect.y, rect.bottom - content.bottom,
+                    content.x - rect.x,
+                    rect.right - content.right,
+                    content.y - rect.y,
+                    rect.bottom - content.bottom,
                 )
                 report.violations.append(
                     Violation(
@@ -164,7 +168,10 @@ class ConstraintChecker:
                 if first.type.value == "rule" or second.type.value == "rule":
                     continue
                 intersection = first.rect.intersection(second.rect)
-                if intersection.width <= self.overlap_tolerance or intersection.height <= self.overlap_tolerance:
+                if (
+                    intersection.width <= self.overlap_tolerance
+                    or intersection.height <= self.overlap_tolerance
+                ):
                     continue
                 smaller = min(first.rect.area, second.rect.area) or 1.0
                 ratio = intersection.area / smaller
@@ -274,8 +281,7 @@ class ConstraintChecker:
                         type=IssueType.TEXT_OVERFLOW,
                         severity=Severity.CRITICAL if element.estimated_overflow > 0.15 else Severity.HIGH,
                         message=(
-                            f"'{element.frame_name}' overflows by "
-                            f"{element.estimated_overflow * 100:.0f}%"
+                            f"'{element.frame_name}' overflows by {element.estimated_overflow * 100:.0f}%"
                         ),
                         element_id=element.id,
                         magnitude=element.estimated_overflow,
@@ -344,9 +350,7 @@ class ConstraintChecker:
                     )
                 )
 
-    def _check_whitespace(
-        self, elements: list[ElementSpec], content: Rect, report: ConstraintReport
-    ) -> None:
+    def _check_whitespace(self, elements: list[ElementSpec], content: Rect, report: ConstraintReport) -> None:
         rects = [e.rect for e in elements]
         for gap in find_gaps(rects, content, min_ratio=0.06):
             if gap.ratio < 0.10:
@@ -363,9 +367,7 @@ class ConstraintChecker:
             )
 
     def _check_hierarchy(self, elements: list[ElementSpec], report: ConstraintReport) -> None:
-        headlines = [
-            e for e in elements if e.type.value == "headline" and e.typography is not None
-        ]
+        headlines = [e for e in elements if e.type.value == "headline" and e.typography is not None]
         if len(headlines) < 2:
             return
         sizes = sorted((e.typography.size_pt for e in headlines), reverse=True)  # type: ignore[union-attr]

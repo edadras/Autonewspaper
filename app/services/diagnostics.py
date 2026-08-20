@@ -22,7 +22,7 @@ from app.config.paths import AppPaths
 from app.config.settings import SettingsManager
 from app.templates.manager import TemplateManager
 from app.utils.files import free_space_bytes, human_size, is_writable
-from app.vision.fonts import check_fonts, resolve_font_file
+from app.vision.fonts import check_fonts
 from app.vision.renderer import shaping_engine
 
 log = logging.getLogger(__name__)
@@ -76,9 +76,7 @@ class DiagnosticsReport:
     def render(self) -> str:
         """Plain-text report."""
         symbol = {"ok": "✓", "info": "•", "warning": "!", "error": "✗"}
-        return "\n".join(
-            f"{symbol.get(c.status, '?')} {c.name}: {c.detail}" for c in self.checks
-        )
+        return "\n".join(f"{symbol.get(c.status, '?')} {c.name}: {c.detail}" for c in self.checks)
 
 
 class DiagnosticsService:
@@ -244,8 +242,8 @@ class DiagnosticsService:
         substituted = [
             key.split(":", 1)[1]
             for key, value in found.items()
-            if value and Path(value).stem.lower().replace(" ", "")
-            not in key.split(":", 1)[1].lower().replace(" ", "")
+            if value
+            and Path(value).stem.lower().replace(" ", "") not in key.split(":", 1)[1].lower().replace(" ", "")
         ]
         if missing:
             status, detail = "error", f"no usable font for: {', '.join(missing)}"
@@ -270,9 +268,7 @@ class DiagnosticsService:
     def _internet(self) -> Check:
         provider = self.settings.settings.ai.provider
         if provider in ("heuristic", "local"):
-            return Check(
-                "Internet", "info", f"not required by the '{provider}' provider"
-            )
+            return Check("Internet", "info", f"not required by the '{provider}' provider")
         try:
             socket.setdefaulttimeout(4.0)
             with socket.create_connection(("1.1.1.1", 443), timeout=4.0):

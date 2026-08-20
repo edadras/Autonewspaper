@@ -6,7 +6,7 @@ import threading
 
 import pytest
 
-from app.core.errors import AppError, Component, LayoutError, Severity, to_report
+from app.core.errors import Component, LayoutError, Severity, to_report
 from app.core.events import EventBus, EventType
 from app.core.jobs import JobLane, JobQueue, JobState
 from app.core.undo import Command, UndoStack

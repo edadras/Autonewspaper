@@ -46,9 +46,7 @@ class Application:
     """
 
     def __init__(self, data_dir: Path | None = None, *, configure_logging: bool = True) -> None:
-        self.paths: AppPaths = (
-            AppPaths.resolve(data_dir).ensure() if data_dir else get_paths()
-        )
+        self.paths: AppPaths = AppPaths.resolve(data_dir).ensure() if data_dir else get_paths()
         self.settings = SettingsManager(self.paths)
         if configure_logging:
             setup_logging(self.paths.logs, self.settings.settings.log_level)
@@ -72,8 +70,15 @@ class Application:
             self.paths, self.settings, ai=self.ai, adobe=self.adobe, templates=self.templates
         )
         self.pipeline = Pipeline(
-            self.settings, self.projects, self.templates, self.assets,
-            self.ai, self.adobe, self.exporter, self.jobs, self.bus,
+            self.settings,
+            self.projects,
+            self.templates,
+            self.assets,
+            self.ai,
+            self.adobe,
+            self.exporter,
+            self.jobs,
+            self.bus,
         )
 
         self._register()

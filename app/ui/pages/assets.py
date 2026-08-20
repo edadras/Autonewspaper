@@ -37,7 +37,9 @@ class AssetsPage(Page):
     """Picture library with measurements and assignment."""
 
     title = "Assets"
-    subtitle = "Every picture is measured before it is used: resolution, sharpness, exposure, faces and duplicates."
+    subtitle = (
+        "Every picture is measured before it is used: resolution, sharpness, exposure, faces and duplicates."
+    )
     icon = "▨"
 
     def build(self) -> None:
@@ -107,9 +109,7 @@ class AssetsPage(Page):
 
         with handle.uow() as uow:
             assets = uow.assets.for_project(handle.project_id)
-            titles = {
-                a.id: a.display_title[:50] for a in uow.articles.for_project(handle.project_id)
-            }
+            titles = {a.id: a.display_title[:50] for a in uow.articles.for_project(handle.project_id)}
         rows = []
         for asset in assets:
             flags = []
@@ -166,8 +166,7 @@ class AssetsPage(Page):
         for path in paths:
             if path.is_dir():
                 expanded.extend(
-                    child for child in sorted(path.rglob("*"))
-                    if child.suffix.lower() in IMAGE_SUFFIXES
+                    child for child in sorted(path.rglob("*")) if child.suffix.lower() in IMAGE_SUFFIXES
                 )
             else:
                 expanded.append(path)

@@ -25,7 +25,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
-    QSplitter,
     QStackedWidget,
     QStatusBar,
     QVBoxLayout,
@@ -137,9 +136,19 @@ class MainWindow(QMainWindow):
 
         self.pages: list[Page] = []
         for page_class in (
-            DashboardPage, ProjectsPage, NewProjectPage, ContentPage, AssetsPage,
-            TemplatesPage, LayoutPage, PreviewPage, ExportPage,
-            AISettingsPage, AdobeSettingsPage, DiagnosticsPage, LogsPage,
+            DashboardPage,
+            ProjectsPage,
+            NewProjectPage,
+            ContentPage,
+            AssetsPage,
+            TemplatesPage,
+            LayoutPage,
+            PreviewPage,
+            ExportPage,
+            AISettingsPage,
+            AdobeSettingsPage,
+            DiagnosticsPage,
+            LogsPage,
         ):
             page = page_class(application, self.bridge, self)
             self.pages.append(page)

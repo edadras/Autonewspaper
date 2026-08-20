@@ -219,7 +219,9 @@ class LayoutScorer:
         families = {e.typography.font_family for e in text_elements}  # type: ignore[union-attr]
         family_score = 1.0 if len(families) <= 3 else max(0.3, 1.0 - (len(families) - 3) * 0.2)
         direction_ok = sum(
-            1 for e in text_elements if e.typography.direction == expected  # type: ignore[union-attr]
+            1
+            for e in text_elements
+            if e.typography.direction == expected  # type: ignore[union-attr]
         ) / len(text_elements)
         squeezed = sum(1 for e in text_elements if e.meta.get("used_min_size")) / len(text_elements)
         truncated = sum(1 for e in text_elements if e.meta.get("truncated")) / len(text_elements)
@@ -262,7 +264,5 @@ class LayoutScorer:
             "whitespace": IssueType.EXCESSIVE_WHITESPACE,
         }
         return [
-            (mapping[key], value)
-            for key, value in score.penalties.items()
-            if key in mapping and value > 0.5
+            (mapping[key], value) for key, value in score.penalties.items() if key in mapping and value > 0.5
         ]

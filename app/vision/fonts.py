@@ -36,13 +36,33 @@ else:
 #: Faces known to carry Arabic-script glyphs, tried when a Persian or Arabic
 #: family is not installed.
 ARABIC_CAPABLE = [
-    "Vazirmatn", "IRANSans", "Sahel", "Shabnam", "Noto Naskh Arabic", "Noto Sans Arabic",
-    "Amiri", "Scheherazade", "Tahoma", "Arial", "Segoe UI", "FreeSerif", "DejaVu Sans",
+    "Vazirmatn",
+    "IRANSans",
+    "Sahel",
+    "Shabnam",
+    "Noto Naskh Arabic",
+    "Noto Sans Arabic",
+    "Amiri",
+    "Scheherazade",
+    "Tahoma",
+    "Arial",
+    "Segoe UI",
+    "FreeSerif",
+    "DejaVu Sans",
 ]
 
 LATIN_FALLBACKS = [
-    "Source Serif Pro", "Georgia", "Times New Roman", "Liberation Serif", "DejaVu Serif",
-    "Inter", "Segoe UI", "Arial", "Liberation Sans", "DejaVu Sans", "FreeSans",
+    "Source Serif Pro",
+    "Georgia",
+    "Times New Roman",
+    "Liberation Serif",
+    "DejaVu Serif",
+    "Inter",
+    "Segoe UI",
+    "Arial",
+    "Liberation Sans",
+    "DejaVu Sans",
+    "FreeSans",
 ]
 
 STYLE_TOKENS = {
@@ -91,7 +111,7 @@ def _candidates_for(family: str, style: str) -> list[Path]:
         compact = stem.lower().replace(" ", "").replace("-", "").replace("_", "")
         if not compact.startswith(key):
             continue
-        suffix = compact[len(key):]
+        suffix = compact[len(key) :]
         for path in paths:
             score = 0.0
             if not suffix:

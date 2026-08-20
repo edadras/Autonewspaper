@@ -158,13 +158,15 @@ def build_toolset(
                     default="body",
                     choices=[t.value for t in ElementType],
                 ),
-                Parameter("columns", "integer", "Text columns", required=False, default=1,
-                          minimum=1, maximum=8),
+                Parameter(
+                    "columns", "integer", "Text columns", required=False, default=1, minimum=1, maximum=8
+                ),
             ],
             capability="layout.write",
             handler=lambda page, x_mm, y_mm, width_mm, height_mm, text, style="body", columns=1: (
-                _create_frame(context, page, x_mm, y_mm, width_mm, height_mm,
-                              kind=style, text=text, columns=columns)
+                _create_frame(
+                    context, page, x_mm, y_mm, width_mm, height_mm, kind=style, text=text, columns=columns
+                )
             ),
             verifier=verify_geometry,
         )
@@ -179,9 +181,16 @@ def build_toolset(
                 Parameter("asset_id", "integer", "Asset id", required=False, minimum=1),
             ],
             capability="layout.write",
-            handler=lambda page, x_mm, y_mm, width_mm, height_mm, image_path="", asset_id=None: (
-                _create_frame(context, page, x_mm, y_mm, width_mm, height_mm,
-                              kind="image", image_path=image_path, asset_id=asset_id)
+            handler=lambda page, x_mm, y_mm, width_mm, height_mm, image_path="", asset_id=None: _create_frame(
+                context,
+                page,
+                x_mm,
+                y_mm,
+                width_mm,
+                height_mm,
+                kind="image",
+                image_path=image_path,
+                asset_id=asset_id,
             ),
             verifier=verify_geometry,
         )
@@ -193,8 +202,14 @@ def build_toolset(
             parameters=[
                 Parameter("element_id", "string", "Frame id"),
                 Parameter("image_path", "string", "Image file"),
-                Parameter("fit_mode", "string", "How to fit the image", required=False,
-                          default="fill", choices=["fill", "fit", "proportional", "none"]),
+                Parameter(
+                    "fit_mode",
+                    "string",
+                    "How to fit the image",
+                    required=False,
+                    default="fill",
+                    choices=["fill", "fit", "proportional", "none"],
+                ),
             ],
             capability="layout.write",
             handler=lambda element_id, image_path, fit_mode="fill": _place_image(
@@ -226,9 +241,7 @@ def build_toolset(
                 Parameter("height_mm", "number", "New height", minimum=5, maximum=2000),
             ],
             capability="layout.write",
-            handler=lambda element_id, width_mm, height_mm: _resize(
-                context, element_id, width_mm, height_mm
-            ),
+            handler=lambda element_id, width_mm, height_mm: _resize(context, element_id, width_mm, height_mm),
             verifier=verify_geometry,
         )
     )
@@ -252,8 +265,7 @@ def build_toolset(
             description="Apply a paragraph style to a text frame.",
             parameters=[
                 Parameter("element_id", "string", "Frame id"),
-                Parameter("style", "string", "Style id",
-                          choices=[t.value for t in ElementType]),
+                Parameter("style", "string", "Style id", choices=[t.value for t in ElementType]),
             ],
             capability="layout.write",
             handler=lambda element_id, style: _apply_style(context, element_id, style),
@@ -291,13 +303,19 @@ def build_toolset(
             parameters=[
                 Parameter("article_id", "integer", "Story id", minimum=1),
                 Parameter("subject", "string", "What the picture must show"),
-                Parameter("aspect_ratio", "string", "Aspect ratio", required=False,
-                          default="16:9", choices=["16:9", "4:3", "3:2", "1:1", "3:4", "2:3"]),
+                Parameter(
+                    "aspect_ratio",
+                    "string",
+                    "Aspect ratio",
+                    required=False,
+                    default="16:9",
+                    choices=["16:9", "4:3", "3:2", "1:1", "3:4", "2:3"],
+                ),
                 Parameter("category", "string", "Story category", required=False, default="general"),
             ],
             capability="ai.generate_image",
-            handler=lambda article_id, subject, aspect_ratio="16:9", category="general": (
-                _generate_image(context, article_id, subject, aspect_ratio, category)
+            handler=lambda article_id, subject, aspect_ratio="16:9", category="general": _generate_image(
+                context, article_id, subject, aspect_ratio, category
             ),
             verifier=verify_truthy,
         )
@@ -325,8 +343,14 @@ def build_toolset(
             name="export_pdf",
             description="Export the edition to PDF with the given preset.",
             parameters=[
-                Parameter("preset", "string", "PDF preset", required=False, default="print",
-                          choices=["print", "high_quality", "digital", "web"]),
+                Parameter(
+                    "preset",
+                    "string",
+                    "PDF preset",
+                    required=False,
+                    default="print",
+                    choices=["print", "high_quality", "digital", "web"],
+                ),
             ],
             capability="export.write",
             handler=lambda preset="print": _export_pdf(context, preset),
@@ -401,8 +425,7 @@ def _create_frame(
     rect = Rect(x=x_mm, y=y_mm, width=width_mm, height=height_mm)
     if not page.page_rect.contains(rect, tolerance=0.5):
         raise ToolValidationError(
-            f"The frame would fall outside page {page_index} "
-            f"({page.width_mm:.0f}x{page.height_mm:.0f} mm)"
+            f"The frame would fall outside page {page_index} ({page.width_mm:.0f}x{page.height_mm:.0f} mm)"
         )
     for other in page.elements:
         if other.rect.overlaps(rect, tolerance=0.6):
@@ -424,9 +447,7 @@ def _create_frame(
         column_span=columns,
     )
     if element.is_text and text:
-        fit = context.engine.typography.fit(
-            text, rect, element_type, columns=columns, allow_truncate=False
-        )
+        fit = context.engine.typography.fit(text, rect, element_type, columns=columns, allow_truncate=False)
         element.typography = fit.typography
         element.estimated_overflow = fit.overflow
     page.elements.append(element)
@@ -439,14 +460,15 @@ def _create_frame(
             controller.create_text_frame(page_index, element, context.template)
     return {
         "id": element_id,
-        "x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height,
+        "x": rect.x,
+        "y": rect.y,
+        "width": rect.width,
+        "height": rect.height,
         "overflow": element.estimated_overflow,
     }
 
 
-def _place_image(
-    context: AgentContext, element_id: str, image_path: str, fit_mode: str
-) -> dict[str, Any]:
+def _place_image(context: AgentContext, element_id: str, image_path: str, fit_mode: str) -> dict[str, Any]:
     _page, element = context.element(element_id)
     if not element.is_image:
         raise ToolValidationError(f"'{element_id}' is not a picture frame")
@@ -466,8 +488,11 @@ def _insert_text(context: AgentContext, element_id: str, text: str) -> dict[str,
         raise ToolValidationError(f"'{element_id}' is not a text frame")
     element.text = text
     fit = context.engine.typography.fit(
-        text, element.rect, element.type,
-        columns=max(1, element.column_span), allow_truncate=False,
+        text,
+        element.rect,
+        element.type,
+        columns=max(1, element.column_span),
+        allow_truncate=False,
     )
     element.typography = fit.typography
     element.estimated_overflow = fit.overflow
@@ -486,8 +511,11 @@ def _resize(context: AgentContext, element_id: str, width_mm: float, height_mm: 
     if context.indesign_live:
         context.adobe.indesign.set_bounds(element.frame_name, candidate)
     return {
-        "id": element_id, "x": candidate.x, "y": candidate.y,
-        "width": candidate.width, "height": candidate.height,
+        "id": element_id,
+        "x": candidate.x,
+        "y": candidate.y,
+        "width": candidate.width,
+        "height": candidate.height,
         "overflow": element.estimated_overflow,
     }
 
@@ -500,8 +528,11 @@ def _move(context: AgentContext, element_id: str, x_mm: float, y_mm: float) -> d
     if context.indesign_live:
         context.adobe.indesign.set_bounds(element.frame_name, candidate)
     return {
-        "id": element_id, "x": candidate.x, "y": candidate.y,
-        "width": candidate.width, "height": candidate.height,
+        "id": element_id,
+        "x": candidate.x,
+        "y": candidate.y,
+        "width": candidate.width,
+        "height": candidate.height,
     }
 
 
@@ -525,15 +556,16 @@ def _apply_style(context: AgentContext, element_id: str, style: str) -> dict[str
     element.style_id = style
     if element.is_text:
         fit = context.engine.typography.fit(
-            element.text, element.rect, element_type,
-            columns=max(1, element.column_span), allow_truncate=False,
+            element.text,
+            element.rect,
+            element_type,
+            columns=max(1, element.column_span),
+            allow_truncate=False,
         )
         element.typography = fit.typography
         element.estimated_overflow = fit.overflow
         if context.indesign_live:
-            context.adobe.indesign.apply_paragraph_style(
-                element.frame_name, fit.typography.style_name
-            )
+            context.adobe.indesign.apply_paragraph_style(element.frame_name, fit.typography.style_name)
     return {"id": element_id, "style": style, "overflow": element.estimated_overflow}
 
 
@@ -574,8 +606,10 @@ def _analyze_page(context: AgentContext, page_index: int) -> dict[str, Any]:
         "passed": qa.passed(context.qa.threshold),
         "preview": preview["path"],
         "live_area": {
-            "x": round(content.x, 2), "y": round(content.y, 2),
-            "width": round(content.width, 2), "height": round(content.height, 2),
+            "x": round(content.x, 2),
+            "y": round(content.y, 2),
+            "width": round(content.width, 2),
+            "height": round(content.height, 2),
         },
         "issues": [
             {
@@ -631,8 +665,13 @@ def _generate_image(
 
 def _export_pdf(context: AgentContext, preset: str) -> dict[str, Any]:
     result = context.exporter.export(
-        context.handle, context.plan, context.template, presets=[preset],
-        export_indd=False, export_idml=False, export_previews=False,
+        context.handle,
+        context.plan,
+        context.template,
+        presets=[preset],
+        export_indd=False,
+        export_idml=False,
+        export_previews=False,
     )
     path = result.pdfs.get(preset) or result.primary_pdf
     return {"path": path, "engine": result.engine, "warnings": result.warnings}

@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -22,7 +20,7 @@ from PySide6.QtWidgets import (
 
 from app.config.secrets import mask
 from app.ui.pages.base import Page
-from app.ui.widgets.common import Card, DataTable, Toolbar, run_guarded
+from app.ui.widgets.common import DataTable, Toolbar, run_guarded
 
 log = logging.getLogger(__name__)
 
@@ -78,7 +76,9 @@ class AISettingsPage(Page):
         self.image_style_edit = QLineEdit()
         self.image_negative_edit = QLineEdit()
         self.image_base_url_edit = QLineEdit()
-        self.image_base_url_edit.setPlaceholderText("http://127.0.0.1:7860 for a local Stable Diffusion server")
+        self.image_base_url_edit.setPlaceholderText(
+            "http://127.0.0.1:7860 for a local Stable Diffusion server"
+        )
         image_form.addRow("Provider", self.image_provider_box)
         image_form.addRow("Model", self.image_model_edit)
         image_form.addRow("Default style", self.image_style_edit)
@@ -200,8 +200,10 @@ class AISettingsPage(Page):
 
     def _test(self) -> None:
         def action() -> None:
-            lines = [f"{h.name}: {'ok' if h.available else 'unavailable'} - {h.detail}"
-                     for h in self.app.ai.health()]
+            lines = [
+                f"{h.name}: {'ok' if h.available else 'unavailable'} - {h.detail}"
+                for h in self.app.ai.health()
+            ]
             self.result.setPlainText("\n".join(lines))
 
         run_guarded(self, "Test AI connection", action)

@@ -23,9 +23,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--version", action="version", version=f"{__app_name__} {__version__}")
     parser.add_argument("--data-dir", type=Path, help="Override the user data directory")
     parser.add_argument("--project", help="Open this project on start (slug or folder)")
-    parser.add_argument(
-        "--generate", action="store_true", help="Run the pipeline head-less and exit"
-    )
+    parser.add_argument("--generate", action="store_true", help="Run the pipeline head-less and exit")
     parser.add_argument("--mode", default=None, choices=["auto", "semi_auto", "manual"])
     parser.add_argument("--diagnostics", action="store_true", help="Print diagnostics and exit")
     parser.add_argument("--log-level", default=None, choices=["DEBUG", "INFO", "WARNING", "ERROR"])

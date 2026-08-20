@@ -7,8 +7,9 @@ is deliberately free of any layout policy - policy lives in
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable, Literal
+from typing import Literal
 
 from app.models.schemas import Rect
 
@@ -205,9 +206,7 @@ def find_gaps(rects: list[Rect], area: Rect, min_ratio: float = 0.04) -> list[Ga
         for col in range(steps_x):
             cx = area.x + (col + 0.5) * cell_w
             cy = area.y + (row + 0.5) * cell_h
-            occupied[row][col] = any(
-                r.x <= cx <= r.right and r.y <= cy <= r.bottom for r in rects
-            )
+            occupied[row][col] = any(r.x <= cx <= r.right and r.y <= cy <= r.bottom for r in rects)
 
     gaps: list[Gap] = []
     seen = [[False] * steps_x for _ in range(steps_y)]
@@ -220,8 +219,7 @@ def find_gaps(rects: list[Rect], area: Rect, min_ratio: float = 0.04) -> list[Ga
                 width += 1
             height = 1
             while row + height < steps_y and all(
-                not occupied[row + height][c] and not seen[row + height][c]
-                for c in range(col, col + width)
+                not occupied[row + height][c] and not seen[row + height][c] for c in range(col, col + width)
             ):
                 height += 1
             for r in range(row, row + height):

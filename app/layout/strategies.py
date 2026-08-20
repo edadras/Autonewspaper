@@ -9,8 +9,9 @@ never be produced with stories on top of each other.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from app.layout.geometry import distribute, guillotine, split_horizontal, split_vertical
 from app.layout.grid import GridSystem
@@ -164,15 +165,12 @@ def _snap_regions(grid: GridSystem, regions: list[Region], gutter: float) -> lis
                 if candidate.width <= 0 or candidate.height <= 0:
                     break
         if candidate.width < 6.0 or candidate.height < 6.0:
-            log.debug(
-                "Dropping region for article %s: no space left on the page", region.block.article_id
-            )
+            log.debug("Dropping region for article %s: no space left on the page", region.block.article_id)
             continue
         candidate = grid.clamp(candidate)
         placed.append(candidate)
         out.append(Region(block=region.block, rect=candidate))
     return out
-
 
 
 def allocate_columns(weights: list[float], total_columns: int, minimum: int = 1) -> list[int]:
@@ -241,7 +239,7 @@ def hierarchical(grid: GridSystem, area: Rect, blocks: list[ArticleBlock], varia
         if variant % 2:
             orientations = ["horizontal", "vertical", "horizontal", "vertical"]
         rects = guillotine(bottom, _weights(rest), orientations, gutter)
-        regions.extend(Region(block, rect) for block, rect in zip(rest, rects))
+        regions.extend(Region(block, rect) for block, rect in zip(rest, rects, strict=False))
     return _snap_regions(grid, regions, gutter)
 
 
@@ -258,7 +256,9 @@ def modular(grid: GridSystem, area: Rect, blocks: list[ArticleBlock], variant: i
     orientations = starts[variant % len(starts)]
     rects = guillotine(area, _weights(blocks), orientations, grid.gutter_mm)
     return _snap_regions(
-        grid, [Region(block, rect) for block, rect in zip(blocks, rects)], grid.gutter_mm
+        grid,
+        [Region(block, rect) for block, rect in zip(blocks, rects, strict=False)],
+        grid.gutter_mm,
     )
 
 
@@ -271,7 +271,9 @@ def horizontal(grid: GridSystem, area: Rect, blocks: list[ArticleBlock], variant
         weights = [w * (1.25 if index == 0 else 0.95) for index, w in enumerate(weights)]
     rects = distribute(area, weights, "horizontal", grid.gutter_mm)
     return _snap_regions(
-        grid, [Region(block, rect) for block, rect in zip(blocks, rects)], grid.gutter_mm
+        grid,
+        [Region(block, rect) for block, rect in zip(blocks, rects, strict=False)],
+        grid.gutter_mm,
     )
 
 
@@ -288,11 +290,9 @@ def vertical(grid: GridSystem, area: Rect, blocks: list[ArticleBlock], variant: 
         band_count = -(-len(blocks) // grid.columns)
         chunks = [blocks[i::band_count] for i in range(band_count)]
         chunks = [chunk for chunk in chunks if chunk]
-        bands = distribute(
-            area, [sum(_weights(chunk)) for chunk in chunks], "horizontal", grid.gutter_mm
-        )
+        bands = distribute(area, [sum(_weights(chunk)) for chunk in chunks], "horizontal", grid.gutter_mm)
         regions: list[Region] = []
-        for chunk, band in zip(chunks, bands):
+        for chunk, band in zip(chunks, bands, strict=False):
             regions.extend(_columns_in(grid, band, chunk))
         return _snap_regions(grid, regions, grid.gutter_mm)
 
@@ -314,7 +314,7 @@ def _columns_in(grid: GridSystem, area: Rect, blocks: list[ArticleBlock]) -> lis
     available = grid.columns - start_column
     regions: list[Region] = []
     cursor = start_column
-    for block, span in zip(blocks, spans):
+    for block, span in zip(blocks, spans, strict=False):
         remaining = start_column + available - cursor
         if remaining <= 0:
             break
@@ -351,7 +351,7 @@ def feature(grid: GridSystem, area: Rect, blocks: list[ArticleBlock], variant: i
     regions = [Region(blocks[0], main_rect)]
     rest = blocks[1:]
     rail_rects = distribute(rail, _weights(rest), "horizontal", gutter)
-    regions.extend(Region(block, rect) for block, rect in zip(rest, rail_rects))
+    regions.extend(Region(block, rect) for block, rect in zip(rest, rail_rects, strict=False))
     return _snap_regions(grid, regions, gutter)
 
 

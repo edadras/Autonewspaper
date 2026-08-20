@@ -77,8 +77,9 @@ class InDesignController:
             )
         strategy = self.bridge.connect(launch=launch, timeout=self.launch_timeout)
         self._connected = True
-        self._emit(EventType.ADOBE_CONNECTED, host="indesign", strategy=strategy.name,
-                   version=self.app.version)
+        self._emit(
+            EventType.ADOBE_CONNECTED, host="indesign", strategy=strategy.name, version=self.app.version
+        )
         return strategy.name
 
     def health(self) -> dict[str, Any]:
@@ -151,8 +152,7 @@ class InDesignController:
         from app.adobe.jsx import template_payload
 
         styles = [
-            typography_payload(None, style.id) | style.model_dump()
-            for style in template.paragraph_styles
+            typography_payload(None, style.id) | style.model_dump() for style in template.paragraph_styles
         ]
         builder = ScriptBuilder("indesign", "apply_styles")
         builder.var("__template", template_payload(template, styles))
@@ -176,8 +176,7 @@ class InDesignController:
             page_count=len(plan.pages),
             template_document=template_document or template.indesign_template_path,
         )
-        self._emit(EventType.ADOBE_COMMAND, host="indesign", command="build_document",
-                   pages=len(plan.pages))
+        self._emit(EventType.ADOBE_COMMAND, host="indesign", command="build_document", pages=len(plan.pages))
         result = self._run(script, "build_document")
         data = dict(result.data or {})
         data["strategy"] = result.strategy
@@ -236,9 +235,7 @@ class InDesignController:
         builder.emit("__ok")
         return bool(self._run(builder.build(), "apply_paragraph_style").data)
 
-    def apply_character_style(
-        self, frame_name: str, style_name: str, start: int, length: int
-    ) -> bool:
+    def apply_character_style(self, frame_name: str, style_name: str, start: int, length: int) -> bool:
         """Apply a character style to a range of characters."""
         builder = ScriptBuilder("indesign", "apply_character_style")
         builder.call("applyCharacterStyle", frame_name, style_name, start, length, assign="__ok")
@@ -330,9 +327,7 @@ class InDesignController:
         return int(self._run(builder.build(), "update_links").data or 0)
 
     # -------------------------------------------------------------- output
-    def render_preview(
-        self, page_index: int, target: Path | str, dpi: int = 110, fmt: str = "png"
-    ) -> Path:
+    def render_preview(self, page_index: int, target: Path | str, dpi: int = 110, fmt: str = "png") -> Path:
         """Export one page as an image for the Vision QA stage."""
         target = Path(target)
         builder = ScriptBuilder("indesign", "render_preview")
@@ -348,9 +343,7 @@ class InDesignController:
         self._emit(EventType.PREVIEW_READY, page=page_index, path=str(target))
         return target
 
-    def export_pdf(
-        self, target: Path | str, preset: PDFPresetSpec | None = None
-    ) -> Path:
+    def export_pdf(self, target: Path | str, preset: PDFPresetSpec | None = None) -> Path:
         """Export the document to PDF using a preset or explicit settings."""
         target = Path(target)
         options = {

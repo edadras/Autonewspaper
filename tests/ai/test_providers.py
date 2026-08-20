@@ -82,8 +82,8 @@ def test_offline_provider_reports_healthy_without_a_network():
 
 
 def test_offline_vision_measures_a_real_image(tmp_path):
-    from tests.conftest import make_image
     from app.ai.base import VisionRequest
+    from tests.conftest import make_image
 
     image = make_image(tmp_path / "p.jpg")
     response = run(HeuristicProvider().analyze_image(VisionRequest([image], "review")))
@@ -94,8 +94,9 @@ def test_offline_vision_measures_a_real_image(tmp_path):
 
 def test_disabled_image_provider_marks_the_placeholder(tmp_path):
     provider = DisabledImageProvider()
-    generated = run(provider.generate(ImageRequest(subject="زلزله", width_px=800, height_px=450),
-                                     tmp_path / "x.png"))
+    generated = run(
+        provider.generate(ImageRequest(subject="زلزله", width_px=800, height_px=450), tmp_path / "x.png")
+    )
     assert Path(generated.path).exists()
     sidecar = json.loads(Path(str(generated.path) + ".ai.json").read_text(encoding="utf-8"))
     assert sidecar["placeholder"] is True
@@ -106,8 +107,12 @@ def test_generated_image_metadata_records_provenance(tmp_path):
     from app.models.schemas import GeneratedImage
 
     metadata = GeneratedImage(
-        path=str(tmp_path / "a.png"), provider="openai", model="gpt-image-1",
-        prompt="p", width=10, height=10,
+        path=str(tmp_path / "a.png"),
+        provider="openai",
+        model="gpt-image-1",
+        prompt="p",
+        width=10,
+        height=10,
     ).metadata()
     assert metadata["ai_generated"] is True
     assert metadata["provider"] == "openai"
@@ -122,8 +127,13 @@ def test_prompt_library_loads_and_renders():
     prompt = library.get("editorial/analysis")
     assert prompt.task == "editorial_analysis"
     system, user = prompt.render(
-        publication_name="P", edition_date="d", language="fa", page_count=4,
-        design_style="classic", max_headline_chars=70, articles_json="[]",
+        publication_name="P",
+        edition_date="d",
+        language="fa",
+        page_count=4,
+        design_style="classic",
+        max_headline_chars=70,
+        articles_json="[]",
     )
     assert "{" in user and "{{" not in user
     assert "page_count" not in user.split("Pages available:")[0]
@@ -145,6 +155,7 @@ def test_unknown_provider_falls_back_to_the_offline_analyser(settings):
 def test_service_degrades_when_the_provider_raises(settings, monkeypatch):
     service = AIService(settings)
     try:
+
         class Broken(HeuristicProvider):
             name = "broken"
 
@@ -154,8 +165,12 @@ def test_service_degrades_when_the_provider_raises(settings, monkeypatch):
         service.text_provider = Broken()
         plan = service.analyze_articles(
             [{"id": 1, "title": "خبر مهم", "body": "متن خبر. " * 30}],
-            project_id=1, publication_name="P", edition_date="2026-01-01",
-            language="fa", page_count=2, design_style="classic",
+            project_id=1,
+            publication_name="P",
+            edition_date="2026-01-01",
+            language="fa",
+            page_count=2,
+            design_style="classic",
         )
         assert plan.analyses, "the run must continue with the offline analyser"
         assert "broken" in service.describe()["degraded"]
