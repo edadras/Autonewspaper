@@ -187,7 +187,11 @@ class TypographyEngine:
                 break
             scale -= 0.04
 
-        assert best is not None
+        if best is None:
+            # The loop found nothing to measure - an empty scale range, or a
+            # style that cannot reach its own minimum. The unscaled resolution
+            # is still a usable answer, and is better than no answer at all.
+            best = FitResult(typography=typography, text=text, overflow=0.0, lines=0)
         if allow_truncate and best.overflow > 0:
             words = T.fit_words(
                 text,

@@ -154,8 +154,9 @@ class LayoutPage(Page):
         run_guarded(self, "Load layout plan", action)
 
     def _fill_tree(self) -> None:
-        assert self.plan is not None
         self.tree.clear()
+        if self.plan is None:
+            return
         for page in self.plan.pages:
             page_item = QTreeWidgetItem(
                 [

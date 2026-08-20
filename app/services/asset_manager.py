@@ -225,7 +225,10 @@ class AssetManager:
         analysis = imaging.analyze(path)
         with handle.uow() as uow:
             row = uow.assets.get(asset_id)
-            assert row is not None
+            if row is None:
+                # Measuring happens outside the transaction, so the picture can
+                # be removed while it is being measured.
+                raise AssetError(f"Asset {asset_id} was removed while it was being measured")
             row.width, row.height = analysis.width, analysis.height
             row.aspect_ratio = analysis.aspect_ratio
             row.dpi = analysis.dpi

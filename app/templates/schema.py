@@ -89,6 +89,26 @@ class ParagraphStyleSpec(TypographySpec):
     rule_below_pt: float = 0.0
     drop_cap_lines: int = 0
 
+    @model_validator(mode="after")
+    def _check_size_range(self) -> ParagraphStyleSpec:
+        """The size range has to contain the size the style is set at.
+
+        An inverted range does not fail loudly: ``clamp`` simply returns the
+        minimum, so a style written with ``min 12 / max 10`` silently sets
+        9.5 pt body copy at 12 pt and nothing says why.
+        """
+        if self.min_size_pt > self.max_size_pt:
+            raise ValueError(
+                f"Paragraph style '{self.id}' has min_size_pt {self.min_size_pt} above "
+                f"max_size_pt {self.max_size_pt}"
+            )
+        if not (self.min_size_pt - 0.01 <= self.size_pt <= self.max_size_pt + 0.01):
+            raise ValueError(
+                f"Paragraph style '{self.id}' is set at {self.size_pt} pt, outside its own "
+                f"{self.min_size_pt}-{self.max_size_pt} pt range"
+            )
+        return self
+
     def clamp(self, size_pt: float) -> float:
         """Constrain a candidate size to this style's allowed range."""
         return max(self.min_size_pt, min(self.max_size_pt, size_pt))

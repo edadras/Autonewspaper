@@ -127,7 +127,10 @@ class EditorialAgent:
         payload = self.ai.summarize(body, language, max_words)
         with handle.uow() as uow:
             article = uow.articles.get(article_id)
-            assert article is not None
+            if article is None:
+                # The summary is generated outside the transaction, so the
+                # operator can delete the story while it is being written.
+                raise ValueError(f"Article {article_id} was deleted while it was being summarised")
             if payload.get("lead"):
                 article.lead = str(payload["lead"])
             if payload.get("summary"):

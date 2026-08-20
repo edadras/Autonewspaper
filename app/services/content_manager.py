@@ -61,6 +61,19 @@ class ParsedArticle:
     ai_image_required: bool = False
     meta: dict[str, Any] = field(default_factory=dict)
 
+    def clean(self) -> ParsedArticle:
+        """Drop characters no page can show, whatever the source carried.
+
+        A NUL in a headline terminates the string on the ExtendScript side and
+        the rest print as boxes. Every parser's output passes through here, so
+        no individual parser has to remember.
+        """
+        for name in ("title", "subtitle", "body", "category", "author", "source"):
+            value = getattr(self, name)
+            if value:
+                setattr(self, name, T.strip_control(value))
+        return self
+
     def is_empty(self) -> bool:
         """Whether there is nothing worth importing."""
         return not (self.title.strip() or self.body.strip())
@@ -105,22 +118,26 @@ class ContentManager:
             raise ContentImportError(f"File not found: {file}")
         suffix = file.suffix.lower()
         try:
-            if suffix in TEXT_SUFFIXES:
-                return self.parse_text(file.read_text(encoding="utf-8", errors="replace"), source=file.name)
-            if suffix in DOCX_SUFFIXES:
-                return self.parse_docx(file)
-            if suffix in PDF_SUFFIXES:
-                return self.parse_pdf(file)
-            if suffix in HTML_SUFFIXES:
-                return self.parse_html(file.read_text(encoding="utf-8", errors="replace"), source=file.name)
-            if suffix in JSON_SUFFIXES:
-                return self.parse_json(read_json(file, []), source=file.name)
-            if suffix in CSV_SUFFIXES:
-                return self.parse_csv(file)
+            return [article.clean() for article in self._parse_by_suffix(file, suffix)]
         except ContentImportError:
             raise
         except Exception as exc:  # noqa: BLE001
             raise ContentImportError(f"Cannot read {file.name}: {exc}", cause=exc) from exc
+
+    def _parse_by_suffix(self, file: Path, suffix: str) -> list[ParsedArticle]:
+        """Dispatch to the parser for *suffix*."""
+        if suffix in TEXT_SUFFIXES:
+            return self.parse_text(file.read_text(encoding="utf-8", errors="replace"), source=file.name)
+        if suffix in DOCX_SUFFIXES:
+            return self.parse_docx(file)
+        if suffix in PDF_SUFFIXES:
+            return self.parse_pdf(file)
+        if suffix in HTML_SUFFIXES:
+            return self.parse_html(file.read_text(encoding="utf-8", errors="replace"), source=file.name)
+        if suffix in JSON_SUFFIXES:
+            return self.parse_json(read_json(file, []), source=file.name)
+        if suffix in CSV_SUFFIXES:
+            return self.parse_csv(file)
         raise ContentImportError(
             f"Unsupported file type '{suffix}'",
             context={"supported": sorted(SUPPORTED_SUFFIXES)},
@@ -130,7 +147,8 @@ class ContentManager:
     def parse_text(self, raw: str, source: str = "") -> list[ParsedArticle]:
         """Parse plain text; ``---`` lines separate several stories."""
         chunks = [c for c in ARTICLE_SEPARATOR.split(raw) if c.strip()]
-        return [a for a in (self._parse_chunk(chunk, source) for chunk in chunks) if not a.is_empty()]
+        parsed = (self._parse_chunk(chunk, source).clean() for chunk in chunks)
+        return [a for a in parsed if not a.is_empty()]
 
     def _parse_chunk(self, chunk: str, source: str) -> ParsedArticle:
         """Parse one story: optional ``key: value`` header, then the body."""
@@ -281,25 +299,103 @@ class ContentManager:
             raise ContentImportError("JSON content must be a list of article objects")
         articles: list[ParsedArticle] = []
         for item in payload:
-            if not isinstance(item, dict):
-                continue
-            articles.append(self._from_mapping(item, source))
+            if isinstance(item, dict):
+                articles.append(self._from_mapping(item, source))
+            elif isinstance(item, str) and item.strip():
+                # A bare list of headlines is a legitimate hand-written file.
+                articles.append(ParsedArticle(title=item.strip(), source=source))
+        articles = [a for a in articles if not a.is_empty()]
         if not articles:
             raise ContentImportError("The JSON file contains no article objects")
         return articles
 
     def parse_csv(self, path: Path) -> list[ParsedArticle]:
-        """Parse a CSV/TSV file with a header row."""
-        delimiter = "\t" if path.suffix.lower() == ".tsv" else ","
+        """Parse a CSV/TSV file, with or without a header row.
+
+        Spreadsheets exported outside an English locale use semicolons, rows
+        are routinely short or long by a field, and a two-column export often
+        has no header at all. None of that is a reason to refuse the file.
+        """
         text = path.read_text(encoding="utf-8-sig", errors="replace")
-        reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
-        if not reader.fieldnames:
-            raise ContentImportError(f"{path.name} has no header row")
-        articles = [self._from_mapping(dict(row), path.name) for row in reader]
+        if not text.strip():
+            raise ContentImportError(f"{path.name} is empty")
+        delimiter = self._csv_delimiter(text, path)
+        rows = list(csv.reader(io.StringIO(text), delimiter=delimiter))
+        rows = [row for row in rows if any(cell.strip() for cell in row)]
+        if not rows:
+            raise ContentImportError(f"{path.name} contains no rows")
+
+        header = [cell.strip() for cell in rows[0]]
+        if self._looks_like_header(header):
+            body_rows, names = rows[1:], header
+        else:
+            # Positional: title, body, then the usual columns in order.
+            body_rows = rows
+            names = ["title", "body", "subtitle", "category", "author", "source"]
+
+        articles: list[ParsedArticle] = []
+        for row in body_rows:
+            mapping: dict[str, Any] = {}
+            for index, cell in enumerate(row):
+                # A row longer than the header keeps its extra cells under a
+                # generated name rather than a None key the parser cannot use.
+                key = names[index] if index < len(names) else f"column_{index + 1}"
+                mapping[key or f"column_{index + 1}"] = cell
+            articles.append(self._from_mapping(mapping, path.name))
         articles = [a for a in articles if not a.is_empty()]
         if not articles:
             raise ContentImportError(f"{path.name} contains no rows with a title or body")
         return articles
+
+    @staticmethod
+    def _csv_delimiter(text: str, path: Path) -> str:
+        """Work out which character separates the fields."""
+        if path.suffix.lower() == ".tsv":
+            return "\t"
+        sample = "\n".join(text.splitlines()[:20])
+        try:
+            return csv.Sniffer().sniff(sample, delimiters=",;\t|").delimiter
+        except csv.Error:
+            # The sniffer gives up on a single column; count instead.
+            first = text.splitlines()[0]
+            counts = {candidate: first.count(candidate) for candidate in ",;\t|"}
+            best = max(counts, key=lambda c: counts[c])
+            return best if counts[best] else ","
+
+    @staticmethod
+    def _looks_like_header(row: list[str]) -> bool:
+        """Whether the first row names the columns rather than carrying data."""
+        known = {
+            "title",
+            "headline",
+            "subtitle",
+            "deck",
+            "body",
+            "content",
+            "text",
+            "category",
+            "section",
+            "author",
+            "byline",
+            "source",
+            "agency",
+            "page",
+            "priority",
+            "importance",
+            "image_required",
+            "needs_image",
+            "عنوان",
+            "تیتر",
+            "زیرتیتر",
+            "متن",
+            "سرویس",
+            "نویسنده",
+            "منبع",
+        }
+        cells = [cell.strip().lower() for cell in row if cell.strip()]
+        if not cells:
+            return False
+        return any(cell in known for cell in cells)
 
     def _from_mapping(self, item: dict[str, Any], source: str) -> ParsedArticle:
         """Build an article from a dictionary with flexible key names."""

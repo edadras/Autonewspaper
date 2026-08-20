@@ -293,3 +293,60 @@ def test_a_disposed_container_does_not_reshut_the_application(tmp_path, caplog):
         application.shutdown()
 
     assert sum("Shutting down" in record.getMessage() for record in caplog.records) == 1
+
+
+# --------------------------------------------------- awkward source files
+@pytest.mark.parametrize(
+    ("name", "content", "titles"),
+    [
+        # A spreadsheet exported outside an English locale.
+        ("semicolons.csv", "headline;body\nT1;B1\nT2;B2\n", ["T1", "T2"]),
+        # A two-column export with no header at all.
+        ("headerless.csv", "خبر اول,متن اول\nخبر دوم,متن دوم\n", ["خبر اول", "خبر دوم"]),
+        # Rows short and long by a field.
+        ("ragged.csv", "headline,body\nT1\nT2,B2,C3\n", ["T1", "T2"]),
+        # A hand-written list of headlines.
+        ("headlines.json", '["first headline", "second headline"]', ["first headline", "second headline"]),
+        # One story rather than a list.
+        ("single.json", '{"headline": "only one", "body": "text"}', ["only one"]),
+    ],
+)
+def test_awkward_but_real_source_files_are_read(application, tmp_path, name, content, titles):
+    path = tmp_path / name
+    path.write_text(content, encoding="utf-8")
+
+    articles = application.content.parse_file(path)
+
+    assert [a.title for a in articles] == titles
+
+
+def test_rows_with_nothing_in_them_are_dropped_not_imported(application, tmp_path):
+    path = tmp_path / "sparse.json"
+    path.write_text('[{"headline": null, "body": null}, {"headline": "real", "body": "text"}]')
+
+    articles = application.content.parse_file(path)
+
+    assert [a.title for a in articles] == ["real"]
+
+
+def test_control_characters_never_reach_the_page(application, tmp_path):
+    """A NUL terminates the string on the ExtendScript side; the rest print as boxes."""
+    path = tmp_path / "dirty.txt"
+    path.write_text("Head\x00line\x07\n\nbody\x1ftext here", encoding="utf-8")
+
+    article = application.content.parse_file(path)[0]
+
+    assert "\x00" not in article.title and "\x07" not in article.title
+    assert article.title == "Headline"
+    assert "\x1f" not in article.body
+
+
+def test_a_tab_separated_file_is_still_read_as_tabs(application, tmp_path):
+    """Sniffing must not turn a TSV into something else."""
+    path = tmp_path / "stories.tsv"
+    path.write_text("headline\tbody\nT1\tB1, with a comma\n", encoding="utf-8")
+
+    articles = application.content.parse_file(path)
+
+    assert articles[0].title == "T1"
+    assert articles[0].body == "B1, with a comma"

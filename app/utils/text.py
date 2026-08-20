@@ -84,6 +84,10 @@ _PUNCT_FA = {",": "،", ";": "؛", "?": "؟"}
 _WORD_RE = re.compile(r"\S+", re.UNICODE)
 _SENTENCE_RE = re.compile(r"[^.!?؟…\n]+[.!?؟…]?", re.UNICODE)
 _WS_RE = re.compile(r"[ \t ]+")
+# Control characters a source document can carry but no page can show. A NUL
+# in a headline terminates the string on the ExtendScript side; the rest
+# print as boxes. Tab, newline and carriage return are kept - they are layout.
+_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _MULTI_NL_RE = re.compile(r"\n{3,}")
 
 
@@ -139,11 +143,16 @@ def to_persian_digits(text: str) -> str:
     return text.translate(str.maketrans(LATIN_DIGITS, PERSIAN_DIGITS))
 
 
+def strip_control(text: str) -> str:
+    """Remove control characters that cannot be typeset."""
+    return _CONTROL_RE.sub("", text or "")
+
+
 def normalize_persian(text: str, *, digits: bool = False, punctuation: bool = True) -> str:
     """Normalise Persian text (letters, spacing, optional digits/punctuation)."""
     if not text:
         return ""
-    out = unicodedata.normalize("NFC", text)
+    out = strip_control(unicodedata.normalize("NFC", text))
     for src, dst in _PERSIAN_FIXES.items():
         out = out.replace(src, dst)
     out = out.replace("​", "").replace("﻿", "")
@@ -167,7 +176,7 @@ def normalize_arabic(text: str) -> str:
     """
     if not text:
         return ""
-    out = unicodedata.normalize("NFC", text)
+    out = strip_control(unicodedata.normalize("NFC", text))
     out = out.replace("\u200b", "").replace("\ufeff", "")
     out = _WS_RE.sub(" ", out)
     return _MULTI_NL_RE.sub("\n\n", out).strip()
@@ -179,7 +188,8 @@ def normalize(text: str, language: str = "fa") -> str:
         return normalize_persian(text)
     if language in ("ar", "ur", "he"):
         return normalize_arabic(text)
-    return _MULTI_NL_RE.sub("\n\n", _WS_RE.sub(" ", unicodedata.normalize("NFC", text))).strip()
+    plain = strip_control(unicodedata.normalize("NFC", text))
+    return _MULTI_NL_RE.sub("\n\n", _WS_RE.sub(" ", plain)).strip()
 
 
 def word_count(text: str) -> int:
