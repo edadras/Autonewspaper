@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>AI Newspaper Studio</title>
+  <style>
+    body { font: 12px/1.5 "Segoe UI", system-ui, sans-serif; background: #2b2b2b; color: #d6d6d6;
+           margin: 0; padding: 14px; }
+    h1 { font-size: 13px; margin: 0 0 10px; font-weight: 600; }
+    #state { padding: 8px 10px; border-radius: 4px; background: #1f1f1f; margin-bottom: 10px; }
+    #log { font: 11px/1.45 Consolas, monospace; white-space: pre-wrap; max-height: 130px;
+           overflow-y: auto; background: #1f1f1f; padding: 8px 10px; border-radius: 4px; }
+    .idle { color: #8bc34a; } .busy { color: #ffb74d; } .error { color: #ef5350; }
+  </style>
+</head>
+<body>
+  <h1>AI Newspaper Studio</h1>
+  <div id="state" class="idle">Waiting for the queue…</div>
+  <div id="log"></div>
+  <script src="./CSInterface.js"></script>
+  <script src="./runner.js"></script>
+</body>
+</html>

@@ -324,13 +324,17 @@ class QueueStrategy(ExecutionStrategy):
         self._installed = False
 
     def install(self) -> bool:
-        """Copy the runner into the Scripts Panel folder and point it here."""
+        """Put the runner where the host will find it, and point it here."""
         if self._installed:
             return True
         scripts_dir = self.app.scripts_dir
         if scripts_dir is None:
-            log.debug("No Scripts Panel folder for %s; queue automation unavailable", self.app.kind)
+            log.debug("No script folder for %s; queue automation unavailable", self.app.kind)
             return False
+        if self.app.kind == "premiere":
+            # Premiere has no Scripts Panel: its equivalent is a CEP
+            # extension, which is a folder rather than a single file.
+            return self._install_extension(scripts_dir)
         try:
             scripts_dir.mkdir(parents=True, exist_ok=True)
             source = Path(__file__).resolve().parent / "scripts" / "queue_runner.jsx"
@@ -344,6 +348,35 @@ class QueueStrategy(ExecutionStrategy):
             return True
         except OSError as exc:
             log.warning("Cannot install the queue runner: %s", exc)
+            return False
+
+    def _install_extension(self, extensions_dir: Path) -> bool:
+        """Copy the CEP extension into place and point it at this queue.
+
+        The extension is unsigned, so Premiere will only load it once the
+        debug flag is set; that is the operator's machine to change, and the
+        installer script does it. Copying it here means an application update
+        updates the panel without a reinstall.
+        """
+        source = Path(__file__).resolve().parent / "cep" / "AINewspaperStudio"
+        if not source.exists():  # pragma: no cover - the package would be broken
+            log.error("The Premiere extension is missing from the installation: %s", source)
+            return False
+        target = Path(extensions_dir) / "AINewspaperStudio"
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            for item in source.rglob("*"):
+                if item.is_dir():
+                    (target / item.relative_to(source)).mkdir(parents=True, exist_ok=True)
+                else:
+                    shutil.copy2(item, target / item.relative_to(source))
+            (target / "queue_path.txt").write_text(str(self.queue_dir), encoding="utf-8")
+            (self.queue_dir / "STOP").unlink(missing_ok=True)
+            self._installed = True
+            log.info("Installed the Premiere extension into %s", target)
+            return True
+        except OSError as exc:
+            log.warning("Cannot install the Premiere extension: %s", exc)
             return False
 
     def available(self) -> bool:
@@ -442,7 +475,10 @@ class AdobeBridge:
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self.default_timeout = default_timeout
         self.strategies: list[ExecutionStrategy] = []
-        if prefer_com:
+        # Premiere registers no automation object, so offering COM for it
+        # would only be a connection attempt that always fails; its scripting
+        # goes through the extension in the queue path.
+        if prefer_com and app.kind != "premiere":
             self.strategies.append(ComStrategy(app))
             self.strategies.append(ScriptFileStrategy(app, self.work_dir / "scripts"))
         if allow_queue:

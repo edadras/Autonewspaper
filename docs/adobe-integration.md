@@ -140,6 +140,62 @@ Select the template in the Templates page and press **InDesign file…**. The
 templates that ship with the application cannot be edited, so linking one
 offers to make an editable copy and to switch the project to it.
 
+## Premiere Pro
+
+Premiere is the third host, and it is reached differently from the other two.
+
+**It registers no automation object.** There is no `Premiere.Application` to
+dispatch, so the COM path that InDesign and Photoshop use first does not
+exist here and is not offered - trying it would only be a connection attempt
+that always fails. Premiere's chain is `queue -> ui-automation ->
+input-automation`.
+
+**Scripting goes through an extension panel.** Where InDesign and Photoshop
+have a Scripts Panel folder to drop the resident runner into, Premiere's
+equivalent is a CEP extension. The application ships one; it watches the same
+job queue, hands each job to ExtendScript and writes the result back, so the
+protocol above is unchanged and only the delivery differs.
+
+```
+python scripts/install_premiere_extension.py          # install
+python scripts/install_premiere_extension.py --check  # report only
+python scripts/install_premiere_extension.py --remove # uninstall
+```
+
+The extension is unsigned, so Premiere loads it only once the per-user debug
+flag is set. That script is the one place that changes it, it prints what it
+changed, and `--remove` puts it back. Afterwards, start Premiere and open
+**Window -> Extensions -> AI Newspaper Studio**; the panel has to stay open
+for the application to reach Premiere.
+
+### Two APIs, and which is trusted
+
+The public DOM (`app.project`, `app.encoder`) does most of the work:
+projects, sequences, importing, placing clips, motion and opacity keyframes,
+and export through Media Encoder. It is stable and documented.
+
+A few things exist only on the **QE DOM** - inserting a transition, applying
+a named effect, changing a clip's speed. Adobe neither documents nor promises
+it. Every QE call is wrapped: it reports what it could not do and leaves the
+sequence in a state the operator can finish by hand, rather than half-built.
+`session()` reports whether QE is present at all, so an edit that depends on
+it can be planned differently before anything is built.
+
+### What is built, and what is checked
+
+`build_edit` sends one script for the whole edit: create the sequence at the
+requested frame size and rate, import the footage, lay down the clips,
+transitions, effects, transforms and overlays. Each step reports its own
+outcome and one failing step does not throw the rest away - a transition
+Premiere will not add should not cost the operator the cuts that did work.
+`timeline_report` then says what the timeline actually contains, which is
+what the quality check measures.
+
+A sequence at an arbitrary frame size needs a preset that matches, and one
+may not be installed - so the library writes the preset for the requested
+size rather than hoping. When Premiere still produces a different size, the
+result says so instead of quietly delivering the wrong frame.
+
 ## Detection
 
 Installation paths are never hard-coded. Detection walks: an explicit setting,

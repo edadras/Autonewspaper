@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AI Newspaper Studio - Premiere Pro extension.
+
+  Premiere registers no automation object, so this extension is how the
+  application reaches it: it loads with Premiere, watches the job queue the
+  desktop application writes into, and runs each job's ExtendScript. That is
+  the same file-based automation path (priority 3) used for InDesign and
+  Photoshop; only the delivery mechanism differs.
+
+  The extension is unsigned, so Premiere must be told to allow it - see
+  docs/adobe-integration.md, or run scripts/install_premiere_extension.py,
+  which sets the debug flag and copies this folder into place.
+-->
+<ExtensionManifest Version="7.0" ExtensionBundleId="com.ainewspaperstudio.premiere"
+                   ExtensionBundleVersion="1.0.0" ExtensionBundleName="AI Newspaper Studio">
+  <ExtensionList>
+    <Extension Id="com.ainewspaperstudio.premiere.runner" Version="1.0.0"/>
+  </ExtensionList>
+  <ExecutionEnvironment>
+    <HostList>
+      <Host Name="PPRO" Version="[13.0,99.9]"/>
+    </HostList>
+    <LocaleList>
+      <Locale Code="All"/>
+    </LocaleList>
+    <RequiredRuntimeList>
+      <RequiredRuntime Name="CSXS" Version="6.0"/>
+    </RequiredRuntimeList>
+  </ExecutionEnvironment>
+  <DispatchInfoList>
+    <Extension Id="com.ainewspaperstudio.premiere.runner">
+      <DispatchInfo>
+        <Resources>
+          <MainPath>./index.html</MainPath>
+          <ScriptPath>./jsx/bootstrap.jsx</ScriptPath>
+          <CEFCommandLine>
+            <Parameter>--allow-file-access</Parameter>
+            <Parameter>--allow-file-access-from-files</Parameter>
+          </CEFCommandLine>
+        </Resources>
+        <Lifecycle>
+          <AutoVisible>true</AutoVisible>
+          <StartOn>
+            <Event>applicationActivate</Event>
+          </StartOn>
+        </Lifecycle>
+        <UI>
+          <Type>Panel</Type>
+          <Menu>AI Newspaper Studio</Menu>
+          <Geometry>
+            <Size><Height>240</Height><Width>320</Width></Size>
+          </Geometry>
+        </UI>
+      </DispatchInfo>
+    </Extension>
+  </DispatchInfoList>
+</ExtensionManifest>

@@ -69,6 +69,14 @@ def test_the_builtin_templates_are_packed(datas):
     assert any(destination.rstrip("/") == wanted for _source, destination in datas)
 
 
+def test_the_premiere_extension_is_packed_whole(datas):
+    """It is installed into the CEP folder at run time, so it has to ship."""
+    assert any(destination.rstrip("/") == "app/adobe/cep" for _source, destination in datas)
+    extension = ROOT / "app" / "adobe" / "cep" / "AINewspaperStudio"
+    for required in ("CSXS/manifest.xml", "index.html", "runner.js", "jsx/bootstrap.jsx"):
+        assert (extension / required).exists(), required
+
+
 def test_the_jsx_runtime_files_are_all_present():
     """A missing library file breaks every InDesign call at run time."""
     from app.adobe.jsx import HOST_LIBRARIES, SCRIPTS_DIR

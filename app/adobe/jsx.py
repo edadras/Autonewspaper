@@ -25,6 +25,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent / "scripts"
 HOST_LIBRARIES = {
     "indesign": ["json2.jsx", "ains_core.jsx", "indesign_lib.jsx"],
     "photoshop": ["json2.jsx", "ains_core.jsx", "photoshop_lib.jsx", "photoshop_design.jsx"],
+    "premiere": ["json2.jsx", "ains_core.jsx", "premiere_lib.jsx"],
 }
 
 
@@ -106,7 +107,9 @@ class ScriptBuilder:
     def __init__(self, host: str, name: str = "operation") -> None:
         self.host = host
         self.name = name
-        self.namespace = "AINS.ID" if host == "indesign" else "AINS.PS"
+        self.namespace = {"indesign": "AINS.ID", "photoshop": "AINS.PS", "premiere": "AINS.PPRO"}.get(
+            host, "AINS.PS"
+        )
         self._lines: list[str] = []
 
     def raw(self, code: str) -> ScriptBuilder:

@@ -33,11 +33,16 @@ IS_WINDOWS = sys.platform == "win32"
 
 INDESIGN_EXE = "InDesign.exe"
 PHOTOSHOP_EXE = "Photoshop.exe"
+PREMIERE_EXE = "Adobe Premiere Pro.exe"
 
 # ProgIDs Adobe registers; the un-versioned one points at the newest install.
 INDESIGN_PROGIDS = ["InDesign.Application"] + [
     f"InDesign.Application.{year}" for year in range(2026, 2013, -1)
 ]
+#: Premiere Pro registers no automation object: it is scripted through
+#: ExtendScript inside a CEP extension, never over COM.
+PREMIERE_PROGIDS: list[str] = []
+
 PHOTOSHOP_PROGIDS = ["Photoshop.Application"] + [
     f"Photoshop.Application.{version}" for version in range(180, 120, -5)
 ]
@@ -247,6 +252,23 @@ def _scripts_dir(kind: str, version: str) -> Path | None:
     return None
 
 
+def cep_extensions_dir() -> Path | None:
+    """Where a CEP extension is installed for the current user.
+
+    Premiere Pro has no Scripts Panel folder to drop a resident runner into.
+    Its equivalent is a CEP extension, which lives here and is loaded when the
+    application starts.
+    """
+    if IS_WINDOWS:
+        appdata = os.environ.get("APPDATA")
+        if not appdata:
+            return None
+        return Path(appdata) / "Adobe" / "CEP" / "extensions"
+    if sys.platform == "darwin":  # pragma: no cover - macOS convenience
+        return Path.home() / "Library" / "Application Support" / "Adobe" / "CEP" / "extensions"
+    return None
+
+
 def _version_from_path(path: Path) -> str:
     """Derive a version string from the installation folder name."""
     match = _VERSION_RE.search(path.parent.name)
@@ -259,11 +281,11 @@ def detect_app(
     configured_path: str | None = None,
 ) -> AdobeApp:
     """Detect InDesign or Photoshop, honouring an explicitly configured path."""
-    exe_name = INDESIGN_EXE if kind == "indesign" else PHOTOSHOP_EXE
-    display = "Adobe InDesign" if kind == "indesign" else "Adobe Photoshop"
-    registry_product = "InDesign" if kind == "indesign" else "Photoshop"
-    folder_prefix = "Adobe InDesign" if kind == "indesign" else "Adobe Photoshop"
-    prog_ids = INDESIGN_PROGIDS if kind == "indesign" else PHOTOSHOP_PROGIDS
+    exe_name = EXE_NAMES.get(kind, PHOTOSHOP_EXE)
+    display = DISPLAY_NAMES.get(kind, "Adobe Photoshop")
+    registry_product = REGISTRY_PRODUCTS.get(kind, "Photoshop")
+    folder_prefix = display
+    prog_ids = PROG_IDS.get(kind, PHOTOSHOP_PROGIDS)
 
     app = AdobeApp(kind=kind)
 
@@ -352,6 +374,21 @@ def detect_app(
     return app
 
 
+#: Per-host names, so adding a fourth application is a table entry.
+EXE_NAMES = {"indesign": INDESIGN_EXE, "photoshop": PHOTOSHOP_EXE, "premiere": PREMIERE_EXE}
+DISPLAY_NAMES = {
+    "indesign": "Adobe InDesign",
+    "photoshop": "Adobe Photoshop",
+    "premiere": "Adobe Premiere Pro",
+}
+REGISTRY_PRODUCTS = {"indesign": "InDesign", "photoshop": "Photoshop", "premiere": "Premiere Pro"}
+PROG_IDS = {
+    "indesign": INDESIGN_PROGIDS,
+    "photoshop": PHOTOSHOP_PROGIDS,
+    "premiere": PREMIERE_PROGIDS,
+}
+
+
 def detect_indesign(configured_path: str | None = None) -> AdobeApp:
     """Detect Adobe InDesign."""
     return detect_app("indesign", configured_path=configured_path)
@@ -362,9 +399,30 @@ def detect_photoshop(configured_path: str | None = None) -> AdobeApp:
     return detect_app("photoshop", configured_path=configured_path)
 
 
-def detect_all(indesign_path: str | None = None, photoshop_path: str | None = None) -> dict[str, AdobeApp]:
-    """Detect both applications in one call."""
+def detect_premiere(configured_path: str | None = None) -> AdobeApp:
+    """Detect Adobe Premiere Pro.
+
+    Premiere is scripted through a CEP extension rather than over COM, so the
+    extensions folder takes the place of the Scripts Panel.
+    """
+    app = detect_app("premiere", configured_path=configured_path)
+    app.scripts_dir = cep_extensions_dir()
+    if app.installed and app.scripts_dir is None:
+        app.notes.append(
+            "Premiere is installed but the CEP extensions folder could not be located; "
+            "scripting is unavailable."
+        )
+    return app
+
+
+def detect_all(
+    indesign_path: str | None = None,
+    photoshop_path: str | None = None,
+    premiere_path: str | None = None,
+) -> dict[str, AdobeApp]:
+    """Detect every application in one call."""
     return {
         "indesign": detect_indesign(indesign_path),
         "photoshop": detect_photoshop(photoshop_path),
+        "premiere": detect_premiere(premiere_path),
     }
