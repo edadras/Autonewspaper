@@ -42,6 +42,17 @@ the defaults are restored, so a bad edit never stops the application starting.
     "base_url": null,
     "timeout_seconds": 240.0
   },
+  "video_ai": {
+    "provider": "none",
+    "model": "seedance-1-0-pro",
+    "base_url": null,
+    "default_style": "cinematic, natural light, shallow depth of field",
+    "default_duration_seconds": 5.0,
+    "default_fps": 24.0,
+    "timeout_seconds": 900.0,
+    "poll_seconds": 5.0,
+    "max_concurrent": 1
+  },
   "adobe": {
     "indesign_path": null,
     "photoshop_path": null,
@@ -124,6 +135,19 @@ linearly up to the number of physical cores.
 **`layout.candidates_per_page`** — how many compositions are built and scored
 per page. More candidates means better pages and a longer run; 6 is a good
 balance.
+
+**`video_ai.provider`** — `higgsfield`, `seedance`, `http` or `none`. These
+services all work the same way (submit, poll, download) and differ only in
+what they call things, so `http` points the generic client at any other one
+by base URL alone. The key goes in the credential store like every other, via
+AI Settings.
+
+**`video_ai.timeout_seconds`** — how long one clip may take before it is
+abandoned. A generation runs for minutes, so this is the wall-clock ceiling
+§57 asks for; `poll_seconds` is how often the job is checked in the meantime.
+
+**`video_ai.max_concurrent`** — one at a time by default. These services
+charge per clip and rate-limit hard, so the honest default is not to fan out.
 
 **`adobe.document_source`** — which InDesign document a run builds into:
 `auto` (the one already open, then the template's file, then a new one),

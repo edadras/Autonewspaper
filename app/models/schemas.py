@@ -573,6 +573,78 @@ class ImageRequest(BaseModel):
         return "\n".join(parts)
 
 
+class VideoRequest(BaseModel):
+    """A request handed to a video-generation provider."""
+
+    subject: str
+    """What the shot is of, in words."""
+    style: str = "cinematic"
+    motion: str = ""
+    """How the camera or the subject moves - "slow push in", "handheld pan"."""
+    duration_seconds: float = Field(5.0, gt=0, le=60)
+    aspect_ratio: str = "16:9"
+    width_px: int = 1920
+    height_px: int = 1080
+    fps: float = Field(24.0, gt=0, le=120)
+    negative_prompt: str = "no text, no watermark, no logo, no distorted faces"
+    language: str = "fa"
+    seed: int | None = None
+    reference_image: str = ""
+    """A still to animate, for the providers that take one."""
+    audio: bool = False
+    extra: dict[str, Any] = Field(default_factory=dict)
+    """Provider-specific settings, passed through untouched."""
+
+    def to_prompt(self) -> str:
+        """Render the request as a provider prompt."""
+        parts = [self.subject.strip()]
+        if self.style:
+            parts.append(f"Style: {self.style}")
+        if self.motion:
+            parts.append(f"Camera: {self.motion}")
+        parts.append(f"Aspect ratio: {self.aspect_ratio}")
+        if self.negative_prompt:
+            parts.append(f"Avoid: {self.negative_prompt}")
+        return "\n".join(parts)
+
+
+class GeneratedVideo(BaseModel):
+    """Result of a video generation call."""
+
+    path: str
+    provider: str
+    model: str
+    prompt: str
+    width: int = 0
+    height: int = 0
+    duration_seconds: float = 0.0
+    fps: float = 0.0
+    has_audio: bool = False
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    seed: int | None = None
+    job_id: str = ""
+    cost: float = 0.0
+    """What the provider said this cost, when it says."""
+
+    def metadata(self) -> dict[str, Any]:
+        """Provenance metadata stored next to the asset (see §40)."""
+        return {
+            "ai_generated": True,
+            "kind": "video",
+            "provider": self.provider,
+            "model": self.model,
+            "prompt": self.prompt,
+            "width": self.width,
+            "height": self.height,
+            "duration_seconds": self.duration_seconds,
+            "fps": self.fps,
+            "has_audio": self.has_audio,
+            "seed": self.seed,
+            "job_id": self.job_id,
+            "created_at": self.created_at.isoformat(),
+        }
+
+
 class GeneratedImage(BaseModel):
     """Result of an image generation call."""
 

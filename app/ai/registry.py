@@ -25,6 +25,7 @@ from app.ai.images import IMAGE_PROVIDERS, DisabledImageProvider, ImageGeneratio
 from app.ai.local_provider import LocalProvider
 from app.ai.openai_provider import OpenAIProvider
 from app.ai.prompts import PromptLibrary
+from app.ai.video import VIDEO_PROVIDERS, DisabledVideoProvider, VideoGenerationProvider
 from app.config.settings import SettingsManager
 from app.core.errors import AppError
 from app.models.schemas import (
@@ -32,7 +33,9 @@ from app.models.schemas import (
     ArticleAnalysis,
     EditorialPlan,
     GeneratedImage,
+    GeneratedVideo,
     ImageRequest,
+    VideoRequest,
 )
 
 log = logging.getLogger(__name__)
@@ -85,6 +88,26 @@ def build_image_provider(settings: SettingsManager) -> ImageGenerationProvider:
     )
 
 
+def build_video_provider(settings: SettingsManager) -> VideoGenerationProvider:
+    """Instantiate the configured video generation provider."""
+    config = settings.settings.video_ai
+    factory = VIDEO_PROVIDERS.get(config.provider, DisabledVideoProvider)
+    if factory is DisabledVideoProvider:
+        return DisabledVideoProvider()
+    provider = factory(
+        config.model,
+        api_key=settings.api_key(config.provider) or "",
+        base_url=config.base_url or "",
+        timeout=min(config.timeout_seconds, 300.0),
+        quality=config.quality,
+        health_path=config.health_path,
+    )
+    # §57: a generation is bounded in wall-clock time, not only in retries.
+    provider.timeout_seconds = config.timeout_seconds
+    provider.poll_seconds = config.poll_seconds
+    return provider
+
+
 class _LoopThread:
     """A private asyncio loop so synchronous callers can await coroutines."""
 
@@ -135,6 +158,7 @@ class AIService:
             settings.settings.ai.vision_provider, settings.settings.ai.vision_model, settings
         )
         self.image_provider = build_image_provider(settings)
+        self.video_provider = build_video_provider(settings)
         self._degraded: set[str] = set()
         self._closed = False
 
@@ -147,6 +171,7 @@ class AIService:
         self.text_provider = build_text_provider(config.provider, config.model, self.settings)
         self.vision_provider = build_text_provider(config.vision_provider, config.vision_model, self.settings)
         self.image_provider = build_image_provider(self.settings)
+        self.video_provider = build_video_provider(self.settings)
         self._degraded.clear()
         log.info(
             "AI providers reloaded: text=%s/%s vision=%s/%s images=%s/%s",
@@ -156,6 +181,11 @@ class AIService:
             config.vision_model,
             self.settings.settings.image_ai.provider,
             self.settings.settings.image_ai.model,
+        )
+        log.info(
+            "Video provider: %s/%s",
+            self.settings.settings.video_ai.provider,
+            self.settings.settings.video_ai.model,
         )
 
     def run(self, coro: Coroutine[Any, Any, T], timeout: float | None = None) -> T:
@@ -385,6 +415,63 @@ class AIService:
             log.error("Image generation failed for '%s': %s", request.subject, exc)
             return self.run(DisabledImageProvider().generate(request, Path(target)))
 
+    def generate_video(
+        self,
+        request: VideoRequest,
+        target: Path,
+        *,
+        on_progress: Any = None,
+    ) -> GeneratedVideo:
+        """Generate one clip.
+
+        Unlike a picture, there is no useful placeholder for a failed video:
+        a grey rectangle in a finished edit is worse than an error, so this
+        raises rather than degrading.
+        """
+        config = self.settings.settings.video_ai
+        return self.run(
+            self.video_provider.generate(request, Path(target), on_progress=on_progress),
+            timeout=config.timeout_seconds + 120,
+        )
+
+    def video_request(
+        self,
+        subject: str,
+        *,
+        format_id: str = "",
+        duration_seconds: float | None = None,
+        motion: str = "",
+        style: str = "",
+        reference_image: str = "",
+        seed: int | None = None,
+        **extra: Any,
+    ) -> VideoRequest:
+        """Build a request from the settings, sized for a named format."""
+        config = self.settings.settings.video_ai
+        width, height, fps, aspect = 1920, 1080, config.default_fps, "16:9"
+        if format_id:
+            from app.formats import FORMATS
+
+            item = FORMATS.resolve(format_id)
+            width, height = item.width_px, item.height_px
+            fps = item.fps or config.default_fps
+            aspect = item.aspect_label()
+        return VideoRequest(
+            subject=subject,
+            style=style or config.default_style,
+            motion=motion,
+            duration_seconds=duration_seconds or config.default_duration_seconds,
+            aspect_ratio=aspect,
+            width_px=width,
+            height_px=height,
+            fps=fps,
+            negative_prompt=config.negative_prompt,
+            language=self.settings.settings.ui.language,
+            seed=seed,
+            reference_image=reference_image,
+            extra=extra,
+        )
+
     # --------------------------------------------------------- diagnostics
     def health(self) -> list[ProviderHealth]:
         """Check every configured provider (used by System Diagnostics)."""
@@ -430,7 +517,12 @@ class AIService:
         """
         if self._closed:
             return
-        for provider in (self.text_provider, self.vision_provider, self.image_provider):
+        for provider in (
+            self.text_provider,
+            self.vision_provider,
+            self.image_provider,
+            self.video_provider,
+        ):
             coroutine = provider.close()
             try:
                 self.run(coroutine, timeout=10)

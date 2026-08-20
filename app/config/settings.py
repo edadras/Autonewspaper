@@ -22,6 +22,7 @@ log = logging.getLogger(__name__)
 
 AutomationMode = Literal["auto", "semi_auto", "manual"]
 ProviderName = Literal["openai", "anthropic", "gemini", "local", "heuristic"]
+VideoProviderName = Literal["higgsfield", "seedance", "http", "none"]
 ImageProviderName = Literal["openai", "gemini", "stablediffusion", "local", "none"]
 
 
@@ -55,6 +56,33 @@ class ImageAISettings(BaseModel):
     base_url: str | None = None
     timeout_seconds: float = Field(240.0, gt=0)
     max_concurrent: int = Field(2, ge=1, le=8)
+
+
+class VideoAISettings(BaseModel):
+    """Video generation configuration.
+
+    The provider list is deliberately open: ``http`` points the generic
+    client at any service with the same submit/poll/download shape, so one
+    the application has never heard of needs a base URL rather than a code
+    change.
+    """
+
+    provider: VideoProviderName = "none"
+    model: str = "seedance-1-0-pro"
+    base_url: str | None = None
+    """Overrides the provider's own default; required for ``http``."""
+    default_style: str = "cinematic, natural light, shallow depth of field"
+    negative_prompt: str = "no text, no watermark, no logo, no distorted faces, no extra limbs"
+    default_duration_seconds: float = Field(5.0, gt=0, le=60)
+    default_fps: float = Field(24.0, gt=0, le=120)
+    quality: str = "high"
+    timeout_seconds: float = Field(900.0, gt=0)
+    """A clip takes minutes, so this is the §57 ceiling for one generation."""
+    poll_seconds: float = Field(5.0, ge=1.0, le=60.0)
+    max_concurrent: int = Field(1, ge=1, le=4)
+    """These services charge per clip and rate-limit hard; one at a time is
+    the honest default."""
+    health_path: str = "/models"
 
 
 class AdobeSettings(BaseModel):
@@ -175,6 +203,7 @@ class Settings(BaseSettings):
 
     ai: AISettings = Field(default_factory=AISettings)
     image_ai: ImageAISettings = Field(default_factory=ImageAISettings)
+    video_ai: VideoAISettings = Field(default_factory=VideoAISettings)
     adobe: AdobeSettings = Field(default_factory=AdobeSettings)
     layout: LayoutSettings = Field(default_factory=LayoutSettings)
     export: ExportSettings = Field(default_factory=ExportSettings)

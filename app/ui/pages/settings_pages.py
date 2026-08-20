@@ -34,6 +34,8 @@ DOCUMENT_SOURCES = (
 
 PROVIDERS = ["heuristic", "openai", "anthropic", "gemini", "local"]
 IMAGE_PROVIDERS = ["none", "openai", "gemini", "stablediffusion", "local"]
+#: Taken from the registry so a provider added there appears here too.
+VIDEO_PROVIDERS = ["none", "higgsfield", "seedance", "http"]
 
 
 class AISettingsPage(Page):
@@ -94,10 +96,48 @@ class AISettingsPage(Page):
         image_form.addRow("Endpoint override", self.image_base_url_edit)
         self.root.addWidget(image_group)
 
+        video_group = QGroupBox("Video generation")
+        video_form = QFormLayout(video_group)
+        self.video_provider_box = QComboBox()
+        self.video_provider_box.addItems(VIDEO_PROVIDERS)
+        self.video_model_edit = QLineEdit()
+        self.video_style_edit = QLineEdit()
+        self.video_base_url_edit = QLineEdit()
+        self.video_base_url_edit.setPlaceholderText(
+            "Required for 'http'; overrides the provider's own endpoint otherwise"
+        )
+        self.video_duration_spin = QDoubleSpinBox()
+        self.video_duration_spin.setRange(1.0, 60.0)
+        self.video_duration_spin.setSuffix(" s")
+        self.video_timeout_spin = QDoubleSpinBox()
+        self.video_timeout_spin.setRange(60.0, 3600.0)
+        self.video_timeout_spin.setSuffix(" s")
+        self.video_timeout_spin.setToolTip(
+            "How long one clip may take before it is abandoned. These calls run for minutes."
+        )
+        video_form.addRow("Provider", self.video_provider_box)
+        video_form.addRow("Model", self.video_model_edit)
+        video_form.addRow("Default style", self.video_style_edit)
+        video_form.addRow("Endpoint", self.video_base_url_edit)
+        video_form.addRow("Default length", self.video_duration_spin)
+        video_form.addRow("Give up after", self.video_timeout_spin)
+        self.root.addWidget(video_group)
+
         keys_group = QGroupBox("API keys")
         keys_form = QFormLayout(keys_group)
         self.key_provider_box = QComboBox()
-        self.key_provider_box.addItems(["openai", "anthropic", "gemini", "stablediffusion", "local"])
+        self.key_provider_box.addItems(
+            [
+                "openai",
+                "anthropic",
+                "gemini",
+                "stablediffusion",
+                "local",
+                "higgsfield",
+                "seedance",
+                "http",
+            ]
+        )
         self.key_provider_box.currentTextChanged.connect(self._show_key_state)
         self.key_edit = QLineEdit()
         self.key_edit.setEchoMode(QLineEdit.EchoMode.Password)
@@ -146,6 +186,13 @@ class AISettingsPage(Page):
         self.image_style_edit.setText(image.default_style)
         self.image_negative_edit.setText(image.negative_prompt)
         self.image_base_url_edit.setText(image.base_url or "")
+        video = self.app.settings.settings.video_ai
+        self.video_provider_box.setCurrentText(video.provider)
+        self.video_model_edit.setText(video.model)
+        self.video_style_edit.setText(video.default_style)
+        self.video_base_url_edit.setText(video.base_url or "")
+        self.video_duration_spin.setValue(video.default_duration_seconds)
+        self.video_timeout_spin.setValue(video.timeout_seconds)
         self._show_key_state(self.key_provider_box.currentText())
 
     def _show_key_state(self, provider: str) -> None:
@@ -173,6 +220,14 @@ class AISettingsPage(Page):
                     "default_style": self.image_style_edit.text().strip(),
                     "negative_prompt": self.image_negative_edit.text().strip(),
                     "base_url": self.image_base_url_edit.text().strip() or None,
+                },
+                video_ai={
+                    "provider": self.video_provider_box.currentText(),
+                    "model": self.video_model_edit.text().strip() or "seedance-1-0-pro",
+                    "default_style": self.video_style_edit.text().strip(),
+                    "base_url": self.video_base_url_edit.text().strip() or None,
+                    "default_duration_seconds": self.video_duration_spin.value(),
+                    "timeout_seconds": self.video_timeout_spin.value(),
                 },
             )
             self.app.reload_ai()
