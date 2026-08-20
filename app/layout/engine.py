@@ -40,6 +40,7 @@ from app.models.schemas import (
     Rect,
 )
 from app.templates.schema import MasterPageSpec, TemplateSpec
+from app.utils.dates import format_edition_date
 from app.utils.units import closest_aspect_ratio, pt_to_mm
 
 log = logging.getLogger(__name__)
@@ -271,9 +272,13 @@ class LayoutEngine:
         if master is None:
             return []
         out: list[ElementSpec] = []
+        # A Persian masthead prints the Jalali date; the Gregorian one stays
+        # available for a template that wants both.
         substitutions = {
             "{publication_name}": publication_name,
-            "{edition_date}": edition_date,
+            "{edition_date}": format_edition_date(edition_date, self.language),
+            "{edition_date_short}": format_edition_date(edition_date, self.language, long=False),
+            "{gregorian_date}": edition_date,
             "{page_number}": str(page_index),
             "{page_count}": str(page_count),
             "{section}": section,

@@ -748,9 +748,15 @@ class Pipeline:
             if page.meta.get("empty"):
                 continue
             if not loop.passed:
+                # A bare score gives the operator nothing to act on; QA names
+                # what held the page back, so the warning carries it.
+                reasons = [issue.message for issue in loop.report.issues if issue.advisory]
+                detail = f": {reasons[0]}" if reasons else ""
+                if loop.stopped_because:
+                    detail = f" ({loop.stopped_because}){detail}"
                 ctx.warn(
                     f"Page {page.index} kept at score {loop.report.score:.1f} "
-                    f"after {len(loop.iterations)} iteration(s)"
+                    f"after {len(loop.iterations)} iteration(s){detail}"
                 )
             if loop.report.preview_path:
                 self.bus.publish(EventType.PREVIEW_READY, page=page.index, path=loop.report.preview_path)

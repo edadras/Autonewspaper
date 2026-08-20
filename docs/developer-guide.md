@@ -58,6 +58,24 @@ Subclass `ImageGenerationProvider` in `app/ai/images.py` and add it to
 `IMAGE_PROVIDERS`. Call `self._finalize(target, generated)` so the real pixel
 size is recorded and the provenance sidecar is written.
 
+## Master page tokens
+
+Master-page element text is expanded before the page is composed. The tokens
+a template may use:
+
+| Token | Expands to |
+| --- | --- |
+| `{publication_name}` | The publication's name as entered on the project |
+| `{edition_date}` | The edition date written the way that language prints it - a Persian edition gets the Jalali date in Persian digits (`سه‌شنبه ۳۰ مرداد ۱۴۰۳`), other languages get the ISO date |
+| `{edition_date_short}` | The same date as numbers only (`۱۴۰۳/۰۵/۳۰`) |
+| `{gregorian_date}` | The stored Gregorian date, for a masthead that prints both |
+| `{page_number}` | This page's number |
+| `{page_count}` | Pages in the edition |
+| `{section}` | The section this page belongs to |
+
+An edition date the operator typed as free text rather than a date (a special
+issue, say) is passed through untouched.
+
 ## Adding a layout strategy
 
 Write a function in `app/layout/strategies.py` with the signature

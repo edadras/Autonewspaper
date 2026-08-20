@@ -481,10 +481,20 @@ class QAIssue(BaseModel):
     rect: Rect | None = None
     suggestion: str = ""
     detected_by: Literal["geometry", "pixels", "vision_ai", "indesign"] = "geometry"
+    advisory: bool = False
+    """Explains a score rather than reporting a fault the engine can repair.
+
+    An edition supplied without pictures scores below a demanding threshold
+    however well it is composed. Saying so is useful; trying to correct it is
+    not, so the corrector leaves advisory issues alone and they carry no
+    additional penalty.
+    """
 
     @property
     def weight(self) -> float:
         """Penalty weight used when computing the QA score."""
+        if self.advisory:
+            return 0.0
         return {
             Severity.LOW: 1.0,
             Severity.MEDIUM: 3.0,

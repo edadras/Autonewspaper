@@ -52,6 +52,7 @@ class Application:
             setup_logging(self.paths.logs, self.settings.settings.log_level)
 
         self.container = ServiceContainer()
+        self._shut_down = False
         self.bus = EventBus()
         self.undo = UndoStack(self.settings.settings.ui.undo_steps)
         self.jobs = JobQueue(self.bus, self.settings.settings.pipeline.parallel_workers)
@@ -179,7 +180,16 @@ class Application:
 
     # ------------------------------------------------------------ shutdown
     def shutdown(self) -> None:
-        """Stop the workers and release every resource."""
+        """Stop the workers and release every resource.
+
+        Idempotent: the application registers itself in the container, so
+        disposing the container calls back into here, and the window, the
+        head-less entry point and a crash handler may each ask for a shutdown
+        of their own.
+        """
+        if self._shut_down:
+            return
+        self._shut_down = True
         log.info("Shutting down")
         if self._project_log is not None:
             detach_handler(self._project_log)

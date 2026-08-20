@@ -163,6 +163,13 @@ class VisionQAAgent:
             # low weight and can never raise a page above its measured score.
             final = round(min(final, 0.75 * final + 0.25 * vision_score), 2)
 
+        if final < self.threshold and not issues:
+            # A page can fall short with nothing wrong with it - most often an
+            # edition supplied without pictures. Reporting the score alone
+            # leaves the operator with nothing to act on, so the weakest part
+            # of the composition is named instead.
+            issues.extend(self._explain_shortfall(page, score))
+
         page.qa_score = final
         page.meta["qa"] = {"score": final, "issues": len(issues), "analyzed_by": analyzed_by}
         return QAReport(
@@ -309,6 +316,71 @@ class VisionQAAgent:
                 log.warning("AI correction planning failed on page %d: %s", page.index, exc)
 
         return self.corrector.apply(page, actions, asset_quality=asset_quality, asset_pixels=asset_pixels)
+
+    #: What a weak scoring component means to the operator, and what lifts it.
+    SHORTFALL_ADVICE: dict[str, tuple[IssueType, str, str]] = {
+        "image_quality": (
+            IssueType.IMAGE_MISSING,
+            "no picture is placed on this page",
+            "Assign a picture to the lead story, or lower the QA threshold for a text-only edition.",
+        ),
+        "readability": (
+            IssueType.LOW_READABILITY,
+            "the body text is dense for its measure",
+            "Widen the columns, raise the leading, or shorten the copy.",
+        ),
+        "content_hierarchy": (
+            IssueType.POOR_HIERARCHY,
+            "the headlines do not separate the stories clearly",
+            "Give the lead story a larger headline, or move a story to another page.",
+        ),
+        "visual_balance": (
+            IssueType.UNBALANCED,
+            "the weight of the page sits to one side",
+            "Move a picture or a large headline towards the lighter half.",
+        ),
+        "space_efficiency": (
+            IssueType.EXCESSIVE_WHITESPACE,
+            "the page carries more empty space than the template asks for",
+            "Add a story, lengthen the copy, or reduce the page count.",
+        ),
+        "typography_quality": (
+            IssueType.SMALL_FONT,
+            "the type sizes drift from the template's ladder",
+            "Let the layout re-fit the page, or relax the minimum body size.",
+        ),
+    }
+
+    def _explain_shortfall(self, page: PageLayout, score: Any) -> list[QAIssue]:
+        """Name the components that keep a fault-free page below the threshold."""
+        from app.layout.scoring import WEIGHTS
+
+        gaps = sorted(
+            (
+                (WEIGHTS[key] - value, key)
+                for key, value in score.components.items()
+                if key in WEIGHTS and WEIGHTS[key] - value > 0.5
+            ),
+            reverse=True,
+        )
+        issues: list[QAIssue] = []
+        for lost, key in gaps[:2]:
+            advice = self.SHORTFALL_ADVICE.get(key)
+            if advice is None:
+                continue
+            kind, what, suggestion = advice
+            issues.append(
+                QAIssue(
+                    type=kind,
+                    severity=Severity.LOW,
+                    page_index=page.index,
+                    message=f"Page {page.index} scores {lost:.1f} below the maximum because {what}.",
+                    suggestion=suggestion,
+                    detected_by="geometry",
+                    advisory=True,
+                )
+            )
+        return issues
 
     # ------------------------------------------------------------------ loop
     def run_loop(

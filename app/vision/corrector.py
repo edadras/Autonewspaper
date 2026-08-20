@@ -108,6 +108,9 @@ class LayoutCorrector:
         seen: set[str] = set()
 
         for issue in sorted(issues, key=lambda i: -i.weight):
+            if issue.advisory:
+                # Explains the score; there is nothing here for the engine to do.
+                continue
             element = page.element(issue.element_id) if issue.element_id else None
             key = f"{issue.type.value}:{issue.element_id}"
             if key in seen:

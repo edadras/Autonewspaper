@@ -264,3 +264,32 @@ def test_picture_assignments_can_be_restored(application, project):
 
     application.assets.restore_assignments(project, before)
     assert application.assets.snapshot_assignments(project) == before
+
+
+def test_shutting_down_twice_is_harmless(tmp_path):
+    """The application registers itself in its own container.
+
+    Disposing the container therefore calls back into ``shutdown``, and the
+    window, the head-less entry point and the crash handler may each ask for
+    one of their own - so the second pass must not re-close a disposed engine
+    or a stopped event loop.
+    """
+    from app.application import create_application
+
+    application = create_application(tmp_path / "data")
+    application.shutdown()
+    application.shutdown()  # must not raise
+
+    assert application._shut_down
+
+
+def test_a_disposed_container_does_not_reshut_the_application(tmp_path, caplog):
+    import logging
+
+    from app.application import create_application
+
+    application = create_application(tmp_path / "data")
+    with caplog.at_level(logging.INFO, logger="app.application"):
+        application.shutdown()
+
+    assert sum("Shutting down" in record.getMessage() for record in caplog.records) == 1
