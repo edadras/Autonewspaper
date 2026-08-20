@@ -45,7 +45,7 @@ include = ["app*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-asyncio_mode = "auto"
+# asyncio_mode is provided by pytest-asyncio when it is installed
 filterwarnings = ["ignore::DeprecationWarning"]
 markers = [
     "adobe: requires a real Adobe installation (skipped elsewhere)",

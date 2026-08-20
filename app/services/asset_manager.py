@@ -514,8 +514,24 @@ class AssetManager:
                 "average_quality": round(
                     sum(a.quality_score for a in assets) / len(assets), 1
                 ) if assets else 0.0,
-                "low_quality": [a.filename for a in assets if a.quality_score < 45][:10],
+                "low_quality": [
+                    a.filename for a in assets if self._is_weak(a)
+                ][:10],
             }
+
+    @staticmethod
+    def _is_weak(asset: E.Asset) -> bool:
+        """Whether a picture must not be used for a lead position.
+
+        A low score is one signal; a measured defect (too few pixels, blurred,
+        badly exposed) is another, and either is enough to keep the picture out
+        of the main slot.
+        """
+        if asset.quality_score < 45:
+            return True
+        problems = set(asset.meta.get("analysis", {}).get("problems") or [])
+        blocking = {"low_resolution", "blurry", "underexposed", "overexposed", "flat_contrast"}
+        return bool(problems & blocking)
 
     def suggested_aspect(self, width_mm: float, height_mm: float) -> str:
         """Aspect ratio label for a frame, used when generating images."""

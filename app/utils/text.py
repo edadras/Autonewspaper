@@ -23,6 +23,17 @@ RTL_RANGES = (
     (0xFE70, 0xFEFF),  # Arabic presentation forms-B
 )
 
+PERSIAN_ONLY_LETTERS = "پچژگک"
+ARABIC_ONLY_LETTERS = "ةيكإأؤئ"
+PERSIAN_MARKER_WORDS = {
+    "است", "این", "که", "را", "می", "های", "شد", "بود", "برای", "با", "از", "در",
+    "کرد", "خود", "آن", "هم", "یک", "تا", "رخ", "داد",
+}
+ARABIC_MARKER_WORDS = {
+    "في", "من", "على", "الذي", "هذا", "هذه", "التي", "كان", "إلى", "عن", "قال",
+    "مع", "بعد", "ذلك", "بالعالم", "مرحبا",
+}
+
 RLM = "‏"
 LRM = "‎"
 ZWNJ = "‌"
@@ -36,7 +47,9 @@ _PERSIAN_FIXES = {
 
 _PUNCT_FA = {",": "،", ";": "؛", "?": "؟"}
 
-_WORD_RE = re.compile(r"[^\s‌]+", re.UNICODE)
+# ZWNJ (U+200C) joins the parts of one Persian word, so it must not split
+# tokens: "خیابان\u200cها" is a single word, not two.
+_WORD_RE = re.compile(r"\S+", re.UNICODE)
 _SENTENCE_RE = re.compile(r"[^.!?؟…\n]+[.!?؟…]?", re.UNICODE)
 _WS_RE = re.compile(r"[ \t ]+")
 _MULTI_NL_RE = re.compile(r"\n{3,}")
@@ -62,12 +75,21 @@ def detect_direction(text: str) -> str:
 
 
 def detect_language(text: str) -> str:
-    """Cheap script-based language guess (``fa``/``ar``/``tr``/``en``)."""
+    """Script-based language guess (``fa``/``ar``/``tr``/``en``).
+
+    Persian and Arabic share an alphabet, so the two are separated by counting
+    letters and function words that only one of them uses, rather than by
+    looking for a single marker letter that many Persian sentences lack.
+    """
     if not text.strip():
         return "en"
     if rtl_ratio(text) >= 0.3:
-        persian_only = set("پچژگکی")
-        return "fa" if any(c in persian_only for c in text) else "ar"
+        persian = sum(text.count(ch) for ch in PERSIAN_ONLY_LETTERS)
+        arabic = sum(text.count(ch) for ch in ARABIC_ONLY_LETTERS)
+        tokens = set(_WORD_RE.findall(text))
+        persian += 2 * len(tokens & PERSIAN_MARKER_WORDS)
+        arabic += 2 * len(tokens & ARABIC_MARKER_WORDS)
+        return "ar" if arabic > persian else "fa"
     turkish_only = set("ğışİĞİŞÇÖÜçöü")
     if any(c in turkish_only for c in text):
         return "tr"

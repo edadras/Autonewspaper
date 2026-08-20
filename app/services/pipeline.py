@@ -26,7 +26,7 @@ from app.ai.registry import AIService
 from app.config.settings import SettingsManager
 from app.core.errors import AppError, Component, ErrorReport, PipelineAbort, to_report
 from app.core.events import EventBus, EventType
-from app.core.jobs import CancelToken, JobLane, JobQueue
+from app.core.jobs import CancelToken, JobCancelled, JobLane, JobQueue
 from app.export.exporter import ExportResult, ExportService
 from app.layout.engine import LayoutEngine, make_image_slot
 from app.layout.strategies import ArticleBlock
@@ -147,6 +147,8 @@ class Pipeline:
         ]
         order = [stage for stage, _ in stages]
         skip_until = order.index(resume_from) if resume_from in order else 0
+        if skip_until:
+            skip_until = self._restore_for_resume(context, order, skip_until)
 
         try:
             for index, (stage, handler) in enumerate(stages):
@@ -161,7 +163,7 @@ class Pipeline:
                     raise PipelineAbort(f"The operator stopped the run before '{stage.value}'")
                 try:
                     handler(context)
-                except PipelineAbort:
+                except (PipelineAbort, JobCancelled):
                     raise
                 except Exception as exc:  # noqa: BLE001 - one stage never kills the run
                     report = to_report(exc, Component.PIPELINE)
@@ -177,8 +179,10 @@ class Pipeline:
                 self._record_stage(context, stage)
             result.stage_reached = PipelineStage.DONE
             result.success = True
-        except PipelineAbort as abort:
-            context.warn(abort.message)
+        except (PipelineAbort, JobCancelled) as abort:
+            message = getattr(abort, "message", None) or str(abort) or "The run was cancelled"
+            abort = PipelineAbort(message)
+            context.warn(message)
             self._finish_run(context, "cancelled")
             self.bus.publish(EventType.PIPELINE_CANCELLED, slug=handle.slug, reason=abort.message)
             result.stage_reached = context.stages_done[-1] if context.stages_done else PipelineStage.IMPORT
@@ -189,6 +193,17 @@ class Pipeline:
         except Exception as exc:  # noqa: BLE001
             report = to_report(exc, Component.PIPELINE)
             context.errors.append(report)
+            if token.cancelled:
+                # The failure is a consequence of the operator stopping the run.
+                self._finish_run(context, "cancelled")
+                self.bus.publish(
+                    EventType.PIPELINE_CANCELLED, slug=handle.slug, reason=report.message
+                )
+                result.success = False
+                result.warnings = context.warnings
+                result.errors = [e.to_dict() for e in context.errors]
+                result.duration_seconds = time.monotonic() - context.started
+                return result
             self._finish_run(context, "failed")
             self.bus.publish(
                 EventType.PIPELINE_FAILED, slug=handle.slug, error=report.to_dict()
@@ -206,6 +221,42 @@ class Pipeline:
         )
         log.info(result.summary())
         return result
+
+    def _restore_for_resume(
+        self, ctx: PipelineContext, order: list[PipelineStage], skip_until: int
+    ) -> int:
+        """Load the artefacts the skipped stages would have produced.
+
+        A resumed run must not start from a later stage with an empty context;
+        the editorial and layout plans are read back from the project folder.
+        When the layout plan is missing the run restarts from the layout stage
+        rather than failing.
+        """
+        if ctx.handle.editorial_plan_path.exists():
+            try:
+                ctx.editorial = EditorialPlan.load(ctx.handle.editorial_plan_path)
+            except Exception as exc:  # noqa: BLE001
+                ctx.warn(f"The stored editorial plan could not be read: {exc}")
+
+        needs_plan = order[skip_until] not in (
+            PipelineStage.IMPORT, PipelineStage.ANALYZE, PipelineStage.EDITORIAL,
+            PipelineStage.ASSETS, PipelineStage.IMAGE_GENERATION,
+        )
+        if not needs_plan:
+            return skip_until
+        if ctx.handle.layout_plan_path.exists():
+            try:
+                ctx.plan = LayoutPlan.load(ctx.handle.layout_plan_path)
+                log.info(
+                    "Resuming with the stored layout plan (%d page(s))", len(ctx.plan.pages)
+                )
+                return skip_until
+            except Exception as exc:  # noqa: BLE001
+                ctx.warn(f"The stored layout plan could not be read: {exc}")
+        ctx.warn(
+            "No usable layout plan was found for the resume; restarting from the layout stage."
+        )
+        return order.index(PipelineStage.LAYOUT)
 
     # ------------------------------------------------------------- stages
     def _stage_import(self, ctx: PipelineContext) -> None:
@@ -531,7 +582,8 @@ class Pipeline:
 
     def _stage_scoring(self, ctx: PipelineContext) -> None:
         """Report the plan's score (the engine already picked the best)."""
-        assert ctx.plan is not None
+        if ctx.plan is None:
+            return
         worst = sorted(ctx.plan.pages, key=lambda p: p.score)[:3]
         for page in worst:
             if page.meta.get("empty"):
@@ -546,7 +598,8 @@ class Pipeline:
 
     def _stage_image_processing(self, ctx: PipelineContext) -> None:
         """Crop and resample each placed picture to the frame it will occupy."""
-        assert ctx.plan is not None
+        if ctx.plan is None:
+            return
         tasks: list[tuple[int, float, float]] = []
         for page in ctx.plan.pages:
             for element in page.elements:
@@ -583,7 +636,12 @@ class Pipeline:
 
     def _stage_indesign(self, ctx: PipelineContext) -> None:
         """Build the document in InDesign (exclusive: one shared document)."""
-        assert ctx.plan is not None
+        if ctx.plan is None:
+            raise AppError(
+                "There is no layout plan to build",
+                component=Component.INDESIGN,
+                recovery_action="Run the layout stage first.",
+            )
         if not self.adobe.indesign_app.installed:
             ctx.adobe_strategy = "builtin-renderer"
             ctx.warn(
@@ -619,7 +677,12 @@ class Pipeline:
 
     def _stage_qa(self, ctx: PipelineContext) -> None:
         """Render, review and correct every page (specification §16)."""
-        assert ctx.plan is not None
+        if ctx.plan is None:
+            raise AppError(
+                "There is no layout plan to review",
+                component=Component.PIPELINE,
+                recovery_action="Run the layout stage first.",
+            )
         project = ctx.handle.project()
         config = self.settings.settings
         engine = LayoutEngine(
@@ -733,7 +796,12 @@ class Pipeline:
 
     def _stage_export(self, ctx: PipelineContext) -> None:
         """Produce the deliverables."""
-        assert ctx.plan is not None
+        if ctx.plan is None:
+            raise AppError(
+                "There is no layout plan to export",
+                component=Component.EXPORT,
+                recovery_action="Run the layout stage before exporting.",
+            )
         config = self.settings.settings.export
         presets = [config.default_preset]
         if config.default_preset != "digital":
