@@ -38,6 +38,14 @@ from app.utils.units import closest_aspect_ratio, pt_to_mm
 
 log = logging.getLogger(__name__)
 
+#: Share of the headline style's maximum size each editorial area may use.
+HEADLINE_SIZE_CAP: dict[AreaKind, float] = {
+    AreaKind.MAIN: 1.0,
+    AreaKind.SECONDARY: 0.62,
+    AreaKind.SMALL: 0.42,
+    AreaKind.SIDEBAR: 0.36,
+}
+
 
 @dataclass
 class PageCandidate:
@@ -364,7 +372,13 @@ class LayoutEngine:
         )
         band = _take(max(headline_height, 10.0))
         if band and block.headline:
-            fit = self.typography.fit_display(block.headline, band, ElementType.HEADLINE, max_lines=max_lines)
+            # Cap the display size by editorial weight so a secondary story can
+            # never be set as large as the lead.
+            headline_spec = self.typography.style_spec(ElementType.HEADLINE)
+            cap = headline_spec.max_size_pt * HEADLINE_SIZE_CAP.get(block.area, 0.5)
+            fit = self.typography.fit_display(
+                block.headline, band, ElementType.HEADLINE, max_lines=max_lines, size_cap_pt=cap
+            )
             used = min(band.height, max(10.0, fit.lines * pt_to_mm(fit.typography.leading_pt) * 1.06))
             band = Rect(x=band.x, y=band.y, width=band.width, height=used)
             cursor = band.bottom + gutter

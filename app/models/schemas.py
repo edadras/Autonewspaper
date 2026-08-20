@@ -311,6 +311,10 @@ class PageLayout(BaseModel):
     elements: list[ElementSpec] = Field(default_factory=list)
     score: float = 0.0
     score_breakdown: dict[str, float] = Field(default_factory=dict)
+    qa_score: float = 0.0
+    """Score of the last QA pass over the *rendered* page."""
+    iterations: int = 0
+    """How many correction iterations this page needed."""
     candidate_id: str = ""
     meta: dict[str, Any] = Field(default_factory=dict)
 

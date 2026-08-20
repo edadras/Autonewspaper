@@ -140,9 +140,20 @@ class LayoutScorer:
         if len(sizes) == 1:
             ladder = 0.85
         else:
+            # A step of roughly 1.2x-1.9x between consecutive headline sizes is
+            # the range newspaper display type actually uses; anything inside it
+            # reads as a deliberate ladder, and the score tapers outside it.
+            low, high = 1.2, 1.9
             ratios = [sizes[i] / max(1e-6, sizes[i + 1]) for i in range(len(sizes) - 1)]
-            ideal = 1.28
-            ladder = sum(max(0.0, 1.0 - abs(r - ideal) / ideal) for r in ratios) / len(ratios)
+            steps = []
+            for ratio in ratios:
+                if low <= ratio <= high:
+                    steps.append(1.0)
+                elif ratio < low:
+                    steps.append(max(0.0, 1.0 - (low - ratio) / (low - 1.0)))
+                else:
+                    steps.append(max(0.0, 1.0 - (ratio - high) / high))
+            ladder = sum(steps) / len(steps)
 
         areas = sorted((e.rect.area for e in elements if e.article_id is not None), reverse=True)
         if len(areas) >= 2 and sum(areas) > 0:

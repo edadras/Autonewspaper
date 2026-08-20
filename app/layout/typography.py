@@ -222,15 +222,21 @@ class TypographyEngine:
         element_type: ElementType = ElementType.HEADLINE,
         *,
         max_lines: int = 3,
+        size_cap_pt: float | None = None,
     ) -> FitResult:
-        """Size display type so it fills its frame in at most *max_lines* lines."""
+        """Size display type so it fills its frame in at most *max_lines* lines.
+
+        *size_cap_pt* lets the caller hold a secondary story's headline below
+        the lead's, which is what produces a readable hierarchy on the page.
+        """
         spec = self.style_spec(element_type)
         text = self.prepare(raw_text, element_type)
         if not text:
             return FitResult(self.resolve(element_type), "", 0.0, 0)
 
         best = FitResult(self.resolve(element_type), text, 1.0, 0)
-        size = spec.max_size_pt
+        size = min(spec.max_size_pt, size_cap_pt) if size_cap_pt else spec.max_size_pt
+        size = max(size, spec.min_size_pt)
         while size >= spec.min_size_pt:
             typography = self.resolve(element_type)
             typography.size_pt = round(size, 2)
