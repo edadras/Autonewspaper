@@ -541,6 +541,7 @@
   },
   "layout_rules": {
     "min_body_size_pt": 7.5,
+    "min_secondary_size_pt": 6.0,
     "min_image_dpi": 200.0,
     "min_element_height_mm": 6.0,
     "min_element_width_mm": 18.0,

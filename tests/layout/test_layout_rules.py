@@ -161,3 +161,116 @@ def test_a_deliberately_broken_page_is_detected(plan, template):
     report = ConstraintChecker(template).check(page)
     kinds = {v.type for v in report.violations}
     assert IssueType.OUT_OF_BOUNDS in kinds or IssueType.MARGIN_VIOLATION in kinds
+
+
+# ----------------------------------------------- rules that must not misfire
+def test_a_template_cannot_contradict_its_own_minimums(template):
+    """A style allowed below the rule its template declares is a design fault.
+
+    Two of the shipped templates carried one, and every page they produced was
+    reported as faulty for furniture the operator could not change.
+    """
+    from app.templates.schema import TemplateSpec
+
+    payload = template.model_dump(mode="json")
+    body = next(style for style in payload["paragraph_styles"] if style["id"] == "body")
+    body["min_size_pt"] = payload["layout_rules"]["min_body_size_pt"] - 1.0
+
+    with pytest.raises(ValueError, match="below this template"):
+        TemplateSpec.model_validate(payload)
+
+
+def test_every_shipped_template_is_internally_consistent():
+    from pathlib import Path
+
+    from app.templates.schema import TemplateSpec
+
+    root = Path(__file__).resolve().parents[2] / "templates"
+    files = sorted(root.glob("*.template.json"))
+    assert files
+    for path in files:
+        TemplateSpec.load(path)  # raises when a style breaks its own rules
+
+
+def test_a_folio_may_be_smaller_than_body_text(template):
+    """Folios, captions and kickers are meant to be set small."""
+    from app.layout.constraints import SECONDARY_TEXT
+
+    for style_id in SECONDARY_TEXT:
+        style = template.paragraph_style(style_id)
+        if style is None:
+            continue
+        assert style.min_size_pt >= template.layout_rules.min_secondary_size_pt
+    folio = template.paragraph_style("folio")
+    assert folio is not None
+    assert folio.size_pt < template.paragraph_style("body").size_pt
+
+
+def test_a_picture_exactly_on_the_minimum_is_not_reported(template, article_blocks):
+    """Reporting "200 dpi (minimum 200)" is noise, not information."""
+    from app.layout.constraints import ConstraintChecker
+
+    engine = LayoutEngine(template, language="fa")
+    plan = engine.plan_edition(1, {1: article_blocks}, page_count=1)
+    page = plan.pages[0]
+    image = next((e for e in page.elements if e.is_image), None)
+    assert image is not None
+
+    minimum = template.layout_rules.min_image_dpi
+    # Size the source so the frame prints at exactly the minimum.
+    image.meta["source_width_px"] = int(round(image.rect.width / 25.4 * minimum))
+    image.meta["source_height_px"] = int(round(image.rect.height / 25.4 * minimum))
+
+    report = ConstraintChecker(template).check(page)
+    low = [v for v in report.violations if v.type is IssueType.LOW_IMAGE_RESOLUTION]
+    assert low == [], [v.message for v in low]
+
+
+def test_a_page_number_in_a_full_width_folio_is_not_called_blank(english_template, article_blocks, tmp_path):
+    """The magazine folio holds one digit in a band the width of the page.
+
+    Judging blankness as a fraction of the frame reported every such page as
+    having lost its folio text, at high severity, on a page that was correct.
+    """
+    from app.vision.analyzer import PageAnalyzer
+    from app.vision.renderer import PreviewRenderer
+
+    engine = LayoutEngine(english_template, language="en")
+    plan = engine.plan_edition(
+        1,
+        {1: article_blocks[:2], 2: article_blocks[2:]},
+        page_count=2,
+        publication_name="The Morning",
+        edition_date="2024-08-20",
+    )
+    page = plan.pages[1]
+    folio = next(e for e in page.elements if e.type is ElementType.FOLIO)
+    assert len(folio.text.strip()) <= 3, "this test is about a folio holding just a page number"
+
+    preview = PreviewRenderer(english_template, dpi=110).render_page(page, tmp_path / "page.png")
+    analyzer = PageAnalyzer(110)
+    metrics = analyzer.analyze_pixels(preview.path, page)
+
+    measured = metrics.element_ink[folio.id]
+    assert measured > 0, "the folio rendered nothing at all"
+    issues = analyzer.issues_from_pixels(metrics, page)
+    blank = [i for i in issues if i.type is IssueType.EMPTY_FRAME and i.element_id == folio.id]
+    assert blank == [], f"folio ink {measured:.5f} was called blank"
+
+
+def test_a_frame_that_really_rendered_nothing_is_still_caught(template, article_blocks, tmp_path):
+    from app.vision.analyzer import PageAnalyzer
+    from app.vision.renderer import PreviewRenderer
+
+    engine = LayoutEngine(template, language="fa")
+    plan = engine.plan_edition(1, {1: article_blocks}, page_count=1)
+    page = plan.pages[0]
+    body = next(e for e in page.elements if e.type is ElementType.BODY)
+
+    preview = PreviewRenderer(template, dpi=110).render_page(page, tmp_path / "page.png")
+    analyzer = PageAnalyzer(110)
+    metrics = analyzer.analyze_pixels(preview.path, page)
+    metrics.element_ink[body.id] = 0.0  # as if the frame had come back empty
+
+    issues = analyzer.issues_from_pixels(metrics, page)
+    assert any(i.type is IssueType.EMPTY_FRAME and i.element_id == body.id for i in issues)

@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.templates.schema import (  # noqa: E402
+    SECONDARY_TEXT_STYLES,
     CharacterStyleSpec,
     ColorSpec,
     GridSpec,
@@ -270,6 +271,7 @@ COMMON_OBJECT_STYLES = [
 
 def broadsheet_fa() -> TemplateSpec:
     """Persian broadsheet, six columns, classic news hierarchy."""
+    styles = align_style_floors(persian_paragraph_styles(9.5), body_min=7.5, headline_min=15.0)
     return TemplateSpec(
         id="broadsheet_fa_standard",
         name="روزنامه استاندارد (Broadsheet - Persian)",
@@ -288,7 +290,7 @@ def broadsheet_fa() -> TemplateSpec:
         facing_pages=True,
         grid=GridSpec(columns=6, gutter_mm=4.0, baseline_mm=4.4, rows=14),
         colors=PRINT_COLORS,
-        paragraph_styles=persian_paragraph_styles(9.5),
+        paragraph_styles=styles,
         character_styles=COMMON_CHARACTER_STYLES,
         object_styles=COMMON_OBJECT_STYLES,
         fonts={
@@ -412,6 +414,7 @@ def tabloid_fa() -> TemplateSpec:
             style.size_pt, style.leading_pt, style.max_size_pt = 26, 29, 54
         if style.id == "masthead":
             style.size_pt, style.leading_pt = 48, 48
+    align_style_floors(styles, body_min=8.0, headline_min=16.0)
     return TemplateSpec(
         id="tabloid_fa_modern",
         name="تابلوید مدرن (Tabloid - Persian)",
@@ -625,7 +628,7 @@ def magazine_en() -> TemplateSpec:
             leading_pt=13,
             alignment="left",
             direction="ltr",
-            min_size_pt=8,
+            min_size_pt=8.5,
             max_size_pt=11,
         ),
         ParagraphStyleSpec(
@@ -642,6 +645,7 @@ def magazine_en() -> TemplateSpec:
             max_size_pt=10,
         ),
     ]
+    align_style_floors(styles, body_min=8.5, headline_min=16.0)
     return TemplateSpec(
         id="magazine_en_feature",
         name="Feature Magazine (A4 - English)",
@@ -714,6 +718,29 @@ def magazine_en() -> TemplateSpec:
         ),
         pdf_presets=PDF_PRESETS,
     )
+
+
+def align_style_floors(
+    styles: list[ParagraphStyleSpec], *, body_min: float, headline_min: float
+) -> list[ParagraphStyleSpec]:
+    """Raise each style's floor so it cannot break the template's own rules.
+
+    The Persian styles are shared between the broadsheet and the tabloid,
+    which set different minimums. A style allowed to shrink below the rule its
+    own template declares makes every page report a fault the operator cannot
+    fix, so the floors are lifted to match here.
+    """
+    for style in styles:
+        if style.id in ("headline", "masthead"):
+            floor = headline_min
+        elif style.id in SECONDARY_TEXT_STYLES:
+            continue  # folios, captions and kickers are meant to be smaller
+        else:
+            floor = body_min
+        style.min_size_pt = max(style.min_size_pt, floor)
+        style.size_pt = max(style.size_pt, style.min_size_pt)
+        style.max_size_pt = max(style.max_size_pt, style.min_size_pt)
+    return styles
 
 
 def main() -> int:

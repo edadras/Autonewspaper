@@ -17,6 +17,13 @@ from app.models.schemas import ElementSpec, IssueType, PageLayout, Rect, Severit
 from app.templates.schema import TemplateSpec
 from app.utils.units import effective_dpi
 
+#: Frames that are meant to be set smaller than body copy. Holding them to the
+#: body minimum reports a correctly designed folio as a fault.
+SECONDARY_TEXT = frozenset({"folio", "caption", "kicker", "byline"})
+
+#: How far under the minimum print resolution counts as "on target" (0.5%).
+DPI_TOLERANCE = 0.005
+
 log = logging.getLogger(__name__)
 
 
@@ -256,11 +263,12 @@ class ConstraintChecker:
                         )
                     )
                 continue
-            minimum = (
-                self.rules.headline_min_size_pt
-                if element.type.value in ("headline", "masthead")
-                else self.rules.min_body_size_pt
-            )
+            if element.type.value in ("headline", "masthead"):
+                minimum = self.rules.headline_min_size_pt
+            elif element.type.value in SECONDARY_TEXT:
+                minimum = self.rules.min_secondary_size_pt
+            else:
+                minimum = self.rules.min_body_size_pt
             if typography.size_pt < minimum - 0.01:
                 report.violations.append(
                     Violation(
@@ -335,13 +343,16 @@ class ConstraintChecker:
                 effective_dpi(pixels[0], element.rect.width),
                 effective_dpi(pixels[1], element.rect.height),
             )
-            if dpi < self.rules.min_image_dpi:
+            # A frame sized to the grid lands a whisker under the minimum often
+            # enough that reporting it as a fault - and printing "200 dpi
+            # (minimum 200)" - is noise rather than information.
+            if dpi < self.rules.min_image_dpi * (1.0 - DPI_TOLERANCE):
                 report.violations.append(
                     Violation(
                         type=IssueType.LOW_IMAGE_RESOLUTION,
                         severity=Severity.HIGH if dpi < self.rules.min_image_dpi * 0.75 else Severity.MEDIUM,
                         message=(
-                            f"'{element.frame_name}' would print at {dpi:.0f} dpi "
+                            f"'{element.frame_name}' would print at {dpi:.1f} dpi "
                             f"(minimum {self.rules.min_image_dpi:.0f})"
                         ),
                         element_id=element.id,

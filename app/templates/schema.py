@@ -72,6 +72,10 @@ class GridSpec(BaseModel):
         return content_height_mm / max(1, self.rows)
 
 
+#: Style ids that are meant to be set smaller than body copy.
+SECONDARY_TEXT_STYLES = frozenset({"folio", "caption", "kicker", "byline"})
+
+
 class ParagraphStyleSpec(TypographySpec):
     """A named paragraph style, exported to InDesign as a paragraph style."""
 
@@ -151,6 +155,12 @@ class LayoutRules(BaseModel):
     """Hard and soft constraints the engine must respect."""
 
     min_body_size_pt: float = 7.5
+    min_secondary_size_pt: float = 6.0
+    """Floor for the small furniture - folios, captions, kickers and credits.
+
+    A folio is meant to be smaller than body text; holding it to the body
+    minimum reports the template's own furniture as a fault.
+    """
     min_image_dpi: float = 200.0
     min_element_height_mm: float = 6.0
     min_element_width_mm: float = 18.0
@@ -274,6 +284,31 @@ class TemplateSpec(BaseModel):
             usable = content_width - self.grid.gutter_mm * (self.grid.columns - 1)
             if usable / self.grid.columns < 10:
                 raise ValueError("Column width would be under 10 mm; reduce columns or gutter")
+        return self
+
+    @model_validator(mode="after")
+    def _check_typography(self) -> TemplateSpec:
+        """A template's own styles must satisfy the rules it declares.
+
+        The English magazine shipped with a folio set below its own body
+        minimum, so every page after the first was reported as having a
+        readability fault the operator could not fix - the template was the
+        one at fault. A template that contradicts itself is rejected here
+        rather than at layout time.
+        """
+        for style in self.paragraph_styles:
+            if style.id in ("headline", "masthead"):
+                floor, named = self.layout_rules.headline_min_size_pt, "headline_min_size_pt"
+            elif style.id in SECONDARY_TEXT_STYLES:
+                floor, named = self.layout_rules.min_secondary_size_pt, "min_secondary_size_pt"
+            else:
+                floor, named = self.layout_rules.min_body_size_pt, "min_body_size_pt"
+            smallest = min(style.size_pt, style.min_size_pt)
+            if smallest < floor - 0.01:
+                raise ValueError(
+                    f"Paragraph style '{style.id}' can be set at {smallest:.1f} pt, "
+                    f"below this template's {named} of {floor:.1f} pt"
+                )
         return self
 
     # --------------------------------------------------------------- access

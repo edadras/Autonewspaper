@@ -749,9 +749,11 @@ class Pipeline:
                 continue
             if not loop.passed:
                 # A bare score gives the operator nothing to act on; QA names
-                # what held the page back, so the warning carries it.
-                reasons = [issue.message for issue in loop.report.issues if issue.advisory]
-                detail = f": {reasons[0]}" if reasons else ""
+                # what held the page back, so the warning carries it - the
+                # worst real fault if there is one, otherwise the advisory
+                # note that explains an otherwise sound page.
+                ranked = sorted(loop.report.issues, key=lambda issue: -issue.weight)
+                detail = f": {ranked[0].message}" if ranked else ""
                 if loop.stopped_because:
                     detail = f" ({loop.stopped_because}){detail}"
                 ctx.warn(

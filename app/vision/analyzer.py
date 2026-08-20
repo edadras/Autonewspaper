@@ -24,6 +24,7 @@ from typing import Any
 from PIL import Image, ImageFilter, ImageStat
 
 from app.models.schemas import ElementSpec, IssueType, PageLayout, QAIssue, Rect, Severity
+from app.utils.units import pt_to_mm
 
 log = logging.getLogger(__name__)
 
@@ -190,6 +191,26 @@ class PageAnalyzer:
             return 0.0
         return self._ink_ratio(image.crop(box))
 
+    @staticmethod
+    def _blank_below(element: ElementSpec) -> float:
+        """Ink coverage under which *element* is genuinely empty.
+
+        A fixed fraction of the frame does not work: the page number in a
+        folio band is one small glyph in a strip the width of the page, and
+        renders at well under half a percent while being perfectly correct.
+        The floor is therefore derived from how much ink the frame's own text
+        should produce, and never rises above the fixed fraction that catches
+        a large frame silently losing its copy.
+        """
+        rect = element.rect
+        frame_mm2 = max(1e-6, rect.width * rect.height)
+        size_pt = element.typography.size_pt if element.typography else 9.0
+        # A glyph occupies roughly half an em square, of which about a third
+        # is ink; both are crude, but only the order of magnitude matters.
+        glyph_mm2 = pt_to_mm(size_pt) ** 2 * 0.5 * 0.33
+        expected = len(element.text.strip()) * glyph_mm2 / frame_mm2
+        return min(0.004, max(0.0002, expected * 0.2))
+
     # -------------------------------------------------------------- issues
     def issues_from_pixels(
         self, metrics: PixelMetrics, page: PageLayout, *, whitespace_target: float = 0.14
@@ -266,7 +287,7 @@ class PageAnalyzer:
 
         for element in page.elements:
             ink = metrics.element_ink.get(element.id, 0.0)
-            if element.is_text and element.text.strip() and ink < 0.004:
+            if element.is_text and element.text.strip() and ink < self._blank_below(element):
                 issues.append(
                     QAIssue(
                         type=IssueType.EMPTY_FRAME,
