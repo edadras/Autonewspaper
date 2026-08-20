@@ -124,6 +124,33 @@ def test_an_interrupted_run_is_offered_for_resume(application, project):
         assert uow.runs.latest(project.project_id).status == "interrupted"
 
 
+def test_a_crashed_run_is_still_resumable_after_the_project_is_reopened(application, project):
+    """§30, in the order it actually happens.
+
+    A crash leaves the run flagged ``running``; opening the project is what
+    turns it into ``interrupted``, and that happens before anything asks
+    whether a resume is possible. Checking the flag only in its pre-crash
+    state would miss the state the window really sees.
+    """
+    from app.models import entities as E
+
+    with project.uow() as uow:
+        uow.runs.add(E.PipelineRun(project_id=project.project_id, status="running", stage="layout"))
+
+    reopened = application.open_project(project.slug)  # marks the run interrupted
+
+    assert application.projects.resumable(reopened) is not None
+    assert application.resumable_stage() is PipelineStage.LAYOUT
+
+
+def test_a_finished_run_is_not_offered_for_resume(application, project):
+    application.pipeline.run(project, mode="auto")
+    application.open_project(project.slug)
+
+    assert application.projects.resumable(project) is None
+    assert application.resumable_stage() is None
+
+
 def test_resuming_skips_the_completed_stages(application, project):
     application.pipeline.run(project, mode="auto")
     result = application.pipeline.run(project, mode="auto", resume_from=PipelineStage.EXPORT)

@@ -245,10 +245,17 @@ class PipelineRunRepository(Repository[E.PipelineRun]):
             .limit(1)
         )
 
+    #: Statuses a run can be left in that a resume can pick up from.
+    #:
+    #: ``interrupted`` is what a crashed run becomes: opening a project marks
+    #: every run still flagged ``running`` as interrupted, so by the time the
+    #: window asks whether a resume is possible, that is the status it finds.
+    RESUMABLE_STATUSES = frozenset({"running", "interrupted", "paused", "awaiting_approval"})
+
     def resumable(self, project_id: int) -> E.PipelineRun | None:
         """The most recent run that was interrupted mid-flight."""
         run = self.latest(project_id)
-        if run and run.status in {"running", "paused", "awaiting_approval"}:
+        if run and run.status in self.RESUMABLE_STATUSES:
             return run
         return None
 
