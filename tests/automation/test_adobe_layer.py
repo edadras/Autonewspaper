@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 
 import pytest
 
@@ -278,3 +279,66 @@ def test_vision_matcher_finds_a_known_control():
     assert match is not None
     assert abs(match.x - 400) <= 2 and abs(match.y - 250) <= 2
     assert match_template(screen, Image.new("RGB", (120, 40), "#ff0000"), 0.8) is None
+
+
+@pytest.mark.parametrize(
+    "builder",
+    ["document", "page", "probe_indesign", "probe_photoshop", "photoshop"],
+)
+def test_generated_programs_are_valid_extendscript(builder, page, template, tmp_path):
+    """Every generated program must parse as ES5, which is what ExtendScript is.
+
+    The payload deliberately contains quotes, backslashes, Windows paths and
+    Persian text - the things that break naive string building.
+    """
+    esprima = pytest.importorskip("esprima", reason="esprima is a development dependency")
+
+    if builder == "document":
+        script = build_document_script([page], template, page_count=1)
+    elif builder == "page":
+        script = build_page_script(page, template)
+    elif builder == "probe_indesign":
+        script = build_probe_script("indesign")
+    elif builder == "probe_photoshop":
+        script = build_probe_script("photoshop")
+    else:
+        script = build_photoshop_script(
+            {"source": r"C:\in put\a.jpg", "target": r"C:\out\b.jpg", "aspect": 1.78}
+        )
+
+    text = script.render()
+    assert all(ord(character) < 128 for character in text)
+    esprima.parseScript(text)
+
+
+def test_awkward_content_survives_serialisation(template, article_blocks):
+    """Quotes, backslashes and Windows paths must not break the program."""
+    esprima = pytest.importorskip("esprima", reason="esprima is a development dependency")
+
+    block = article_blocks[0]
+    block.headline = 'یک "نقل‌قول" و \\ یک بک‌اسلش'
+    block.body = 'متن با "quotes", \\backslashes\\ و مسیر C:\\images\\photo 1.jpg. ' * 20
+    if block.image is not None:
+        block.image.path = r"C:\images\photo 1.jpg"
+
+    engine = LayoutEngine(template, candidates_per_page=3)
+    plan = engine.plan_edition(1, {1: [block]}, page_count=1)
+    text = build_document_script(plan.pages, template, page_count=1).render()
+    esprima.parseScript(text)
+    assert "photo 1.jpg" in text.replace("\\\\", "\\")
+
+
+def test_jsx_runtime_files_are_valid_extendscript():
+    """The shipped runtime library itself must parse."""
+    esprima = pytest.importorskip("esprima", reason="esprima is a development dependency")
+
+    directory = Path(__file__).resolve().parents[2] / "app" / "adobe" / "scripts"
+    files = sorted(directory.glob("*.jsx"))
+    assert len(files) == 5
+    for path in files:
+        source = path.read_text(encoding="utf-8")
+        # #targetengine is an ExtendScript pragma, not JavaScript.
+        source = "\n".join(
+            line for line in source.splitlines() if not line.startswith(("#target", "#include"))
+        )
+        esprima.parseScript(source)

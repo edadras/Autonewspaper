@@ -122,6 +122,7 @@ class Pipeline:
         template = self.templates.get_or_default(handle.project()["template_id"])
 
         run_id = self._start_run(handle, mode)
+        self._record_provenance(handle, run_id, template)
         context = PipelineContext(handle=handle, template=template, run_id=run_id, mode=mode, token=token)
         result = PipelineResult(project_id=handle.project_id)
         self.bus.publish(
@@ -865,6 +866,33 @@ class Pipeline:
         return approved
 
     # ------------------------------------------------------------ run rows
+    def _record_provenance(self, handle: ProjectHandle, run_id: int, template: TemplateSpec) -> None:
+        """Store what produced this run so it can be reproduced later.
+
+        The prompt versions matter: editing a prompt changes the editorial
+        judgement, and a run should say which text it was made with.
+        """
+        config = self.settings.settings
+        with handle.uow() as uow:
+            run = uow.runs.get(run_id)
+            if run is None:
+                return
+            run.set_result(
+                {
+                    "provenance": {
+                        "template": template.id,
+                        "template_version": template.version,
+                        "ai_provider": config.ai.provider,
+                        "ai_model": config.ai.model,
+                        "vision_provider": config.ai.vision_provider,
+                        "image_provider": config.image_ai.provider,
+                        "prompt_versions": self.ai.prompt_versions(),
+                        "qa_threshold": config.layout.qa_threshold,
+                        "max_iterations": config.layout.max_iterations,
+                    }
+                }
+            )
+
     def _start_run(self, handle: ProjectHandle, mode: str) -> int:
         with handle.uow() as uow:
             run = E.PipelineRun(project_id=handle.project_id, mode=mode, status="running")
@@ -899,7 +927,9 @@ class Pipeline:
             run.status = status
             run.finished_at = datetime.now(UTC)
             run.score = ctx.plan.score if ctx.plan else 0.0
-            run.set_result(result.model_dump(mode="json") if result else {})
+            payload = dict(run.result)
+            payload.update(result.model_dump(mode="json") if result else {})
+            run.set_result(payload)
             if ctx.errors:
                 run.error_json = E.JSONMixin.dump([e.to_dict() for e in ctx.errors])
             project = uow.projects.get(ctx.handle.project_id)

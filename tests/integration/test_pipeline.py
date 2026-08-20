@@ -188,3 +188,15 @@ def test_a_version_snapshot_is_taken_after_the_run(application, project):
     versions = project.versions.list()
     assert versions
     assert (versions[-1].path / "layout_plan.json").exists()
+
+
+def test_the_run_records_what_produced_it(application, project):
+    application.pipeline.run(project, mode="auto")
+    with project.uow() as uow:
+        run = uow.runs.latest(project.project_id)
+        provenance = run.result.get("provenance")
+    assert provenance
+    assert provenance["template"] == "broadsheet_fa_standard"
+    assert provenance["ai_provider"]
+    assert provenance["prompt_versions"]["editorial/analysis"]
+    assert provenance["qa_threshold"] > 0

@@ -5,3 +5,4 @@ pytest-cov>=5.0
 ruff>=0.4
 mypy>=1.9
 pyinstaller>=6.5
+esprima>=4.0

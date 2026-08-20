@@ -198,9 +198,7 @@ def test_resume_button_appears_for_an_interrupted_run(window, qt_app, applicatio
     assert dashboard.resume_button.isHidden()
 
     with project.uow() as uow:
-        uow.runs.add(
-            E.PipelineRun(project_id=project.project_id, status="running", stage="layout")
-        )
+        uow.runs.add(E.PipelineRun(project_id=project.project_id, status="running", stage="layout"))
     dashboard.refresh()
     qt_app.processEvents()
     assert not dashboard.resume_button.isHidden()

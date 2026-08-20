@@ -31,7 +31,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pytest-cov>=5.0", "ruff>=0.4", "mypy>=1.9", "pyinstaller>=6.5"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pytest-cov>=5.0", "ruff>=0.4", "mypy>=1.9", "pyinstaller>=6.5", "esprima>=4.0"]
 
 [project.scripts]
 ai-newspaper-studio = "app.main:main"
