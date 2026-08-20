@@ -402,3 +402,36 @@ def test_a_worker_thread_failure_is_logged_without_a_dialog(qt_app, window, repo
 
     assert reports == []
     assert any("the worker could not write" in record.getMessage() for record in caplog.records)
+
+
+def test_walking_every_page_of_a_finished_edition_raises_nothing(
+    window, qt_app, application, project, reported_errors, caplog
+):
+    """The pages are only exercised with content after a run has produced some.
+
+    Building a page against an empty project proves little; the interesting
+    state is a finished edition, where every table, preview and export control
+    has real data behind it.
+    """
+    import logging
+
+    application.pipeline.run(project, mode="auto")
+    window.project_opened(project)
+    reports, _shown = reported_errors
+
+    with caplog.at_level(logging.ERROR):
+        for row, page in enumerate(window.pages):
+            window.nav.setCurrentRow(row)
+            qt_app.processEvents()
+            page.refresh()
+            qt_app.processEvents()
+            page.tasks.wait_all(5000)
+            qt_app.processEvents()
+
+    assert reports == [], [report.summary() for report in reports]
+    offenders = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno >= logging.ERROR and record.name.startswith("app.ui")
+    ]
+    assert offenders == []
