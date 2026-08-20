@@ -9,6 +9,7 @@ best picture for each story.
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -71,6 +72,7 @@ class AssetManager:
         self.photoshop = photoshop
         self.jobs = jobs
         self.bus = bus
+        self._photoshop_lock = threading.Lock()
 
     # ------------------------------------------------------------- import
     def import_files(
@@ -260,6 +262,22 @@ class AssetManager:
             row.article_id = article_id
             return True
 
+    def snapshot_assignments(self, handle: ProjectHandle) -> dict[int, int | None]:
+        """Current ``asset id -> article id`` mapping, for undoing a change."""
+        with handle.uow() as uow:
+            return {a.id: a.article_id for a in uow.assets.for_project(handle.project_id)}
+
+    def restore_assignments(self, handle: ProjectHandle, mapping: dict[int, int | None]) -> int:
+        """Put a snapshotted assignment map back."""
+        restored = 0
+        with handle.uow() as uow:
+            for asset_id, article_id in mapping.items():
+                row = uow.assets.get(asset_id)
+                if row is not None and row.article_id != article_id:
+                    row.article_id = article_id
+                    restored += 1
+        return restored
+
     def best_for_article(
         self, handle: ProjectHandle, article_id: int, *, min_quality: float = 0.0
     ) -> E.Asset | None:
@@ -448,10 +466,10 @@ class AssetManager:
         target_height = int(round(frame_height_mm / 25.4 * min_dpi))
         destination = handle.processed_dir / filename
 
-        controller = self.photoshop
-        if controller is None:
-            controller = PhotoshopController(handle.adobe_dir)
-            self.photoshop = controller
+        with self._photoshop_lock:
+            if self.photoshop is None:
+                self.photoshop = PhotoshopController(handle.adobe_dir)
+            controller = self.photoshop
         result = controller.process_image(
             source,
             destination,

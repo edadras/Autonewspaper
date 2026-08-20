@@ -147,6 +147,13 @@ class InDesignController:
         builder.emit("__n")
         return int(self._run(builder.build(), "ensure_pages").data or 0)
 
+    def clear_page(self, page_index: int) -> int:
+        """Remove the frames on a page so it can be rebuilt after a correction."""
+        builder = ScriptBuilder("indesign", "clear_page")
+        builder.call("clearPage", page_index, assign="__n")
+        builder.emit("__n")
+        return int(self._run(builder.build(), "clear_page").data or 0)
+
     def apply_template_styles(self, template: TemplateSpec) -> bool:
         """Create the template's colours, paragraph and object styles."""
         from app.adobe.jsx import template_payload

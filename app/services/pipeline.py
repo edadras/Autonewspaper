@@ -703,6 +703,7 @@ class Pipeline:
         pixels = self.assets.pixel_map(ctx.handle)
 
         corrected_pages = []
+        changed_pages: list[Any] = []
         for page in ctx.plan.pages:
             ctx.token.raise_if_cancelled()
             attempt = {"n": 0}
@@ -726,6 +727,13 @@ class Pipeline:
 
             loop = agent.run_loop(page, render, asset_quality=quality, asset_pixels=pixels)
             corrected_pages.append(loop.page)
+            # The loop corrects the page in place when it eventually passes, so
+            # comparing the returned page with the original would compare an
+            # object with itself. Whether a correction was applied is recorded
+            # in the iteration log, and that is what decides whether InDesign
+            # has to be told about it.
+            if any((record.correction or {}).get("applied") for record in loop.iterations):
+                changed_pages.append(loop.page)
             ctx.qa_reports.append(loop.report)
             self.bus.publish(
                 EventType.QA_REPORT,
@@ -745,11 +753,6 @@ class Pipeline:
             if loop.report.preview_path:
                 self.bus.publish(EventType.PREVIEW_READY, page=page.index, path=loop.report.preview_path)
 
-        rebuilt = [
-            page
-            for page, original in zip(corrected_pages, ctx.plan.pages, strict=False)
-            if page.elements != original.elements
-        ]
         ctx.plan.pages = corrected_pages
         # Pages left empty because the edition ran out of copy are reported as
         # a warning; averaging their score would hide the quality of the rest.
@@ -758,18 +761,29 @@ class Pipeline:
         ctx.plan.save(ctx.handle.layout_plan_path)
         self._persist_plan(ctx, ctx.plan)
 
-        if rebuilt and use_indesign:
-            self._rebuild_corrected_pages(ctx, rebuilt)
+        if changed_pages and use_indesign:
+            log.info(
+                "Re-applying %d corrected page(s) to the InDesign document",
+                len(changed_pages),
+            )
+            self._rebuild_corrected_pages(ctx, changed_pages)
         log.info("Stage QA: edition score %.1f over %d page(s)", ctx.plan.score, len(corrected_pages))
 
     def _rebuild_corrected_pages(self, ctx: PipelineContext, pages: list[Any]) -> None:
         """Re-apply corrected pages to the InDesign document."""
         controller = self.adobe.indesign
-        job = self.jobs.submit(
-            "Apply corrections in InDesign",
-            lambda _ctx: [controller.build_page(page, ctx.template) for page in pages],
-            lane=JobLane.EXCLUSIVE,
-        )
+
+        def rebuild(_ctx: Any) -> list[Any]:
+            results = []
+            for page in pages:
+                # The page already exists in the document; its old frames must
+                # go before the corrected ones are drawn, or the two sets would
+                # sit on top of each other.
+                controller.clear_page(page.index)
+                results.append(controller.build_page(page, ctx.template))
+            return results
+
+        job = self.jobs.submit("Apply corrections in InDesign", rebuild, lane=JobLane.EXCLUSIVE)
         self.jobs.wait([job], timeout=self.settings.settings.adobe.script_timeout_seconds)
         if job.state.value != "succeeded":
             ctx.warn(

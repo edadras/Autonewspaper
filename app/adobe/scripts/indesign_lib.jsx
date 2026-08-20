@@ -126,6 +126,26 @@ AINS.ID = (function () {
         return true;
     };
 
+    /* Remove every frame this application placed on a page, leaving the
+       master-page furniture alone, so a corrected page can be rebuilt. */
+    api.clearPage = function (index) {
+        var page = api.page(index);
+        var items = page.pageItems;
+        var removed = 0;
+        for (var i = items.length - 1; i >= 0; i--) {
+            var item = items[i];
+            try {
+                if (item.parentPage === null) { continue; }
+                delete registry[item.label];
+                item.remove();
+                removed++;
+            } catch (e) {
+                AINS.log("Could not remove an item from page " + index + ": " + e);
+            }
+        }
+        return removed;
+    };
+
     api.page = function (index) {
         var document = api.doc();
         if (index < 1 || index > document.pages.length) {

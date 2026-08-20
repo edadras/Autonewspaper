@@ -448,6 +448,41 @@ class ContentManager:
                 row.word_count = T.word_count(row.body)
             return row.to_dict()
 
+    def snapshot_article(self, handle: ProjectHandle, article_id: int) -> dict[str, Any] | None:
+        """Capture a story so a later change to it can be undone."""
+        with handle.uow() as uow:
+            row = uow.articles.get(article_id)
+            return row.to_dict() if row is not None else None
+
+    def restore_article(self, handle: ProjectHandle, payload: dict[str, Any]) -> int:
+        """Put a snapshotted story back, re-creating it if it was deleted.
+
+        The original id is kept when it is still free, so anything that refers
+        to the story - an assigned picture, a layout frame - still matches.
+        """
+        columns = {column.name for column in E.Article.__table__.columns}
+        data = {
+            key: value
+            for key, value in payload.items()
+            if key in columns and key not in ("created_at", "updated_at")
+        }
+        data["project_id"] = handle.project_id
+        with handle.uow() as uow:
+            existing = uow.articles.get(int(data.get("id") or 0))
+            if existing is not None:
+                for key, value in data.items():
+                    if key != "id":
+                        setattr(existing, key, value)
+                return existing.id
+            row = E.Article(**data)
+            uow.articles.add(row)
+            return row.id
+
+    def snapshot_order(self, handle: ProjectHandle) -> list[int]:
+        """Current running order, for undoing a reorder."""
+        with handle.uow() as uow:
+            return [a.id for a in uow.articles.for_project(handle.project_id)]
+
     def delete_article(self, handle: ProjectHandle, article_id: int) -> bool:
         """Remove an article from the project."""
         with handle.uow() as uow:

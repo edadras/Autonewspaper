@@ -263,11 +263,13 @@ class ContentPage(Page):
     def _save(self) -> None:
         if self._current_id is None or self.handle is None:
             return
+        handle, article_id = self.handle, self._current_id
+        before = self.app.content.snapshot_article(handle, article_id)
 
-        def action() -> None:
+        def apply_edit() -> None:
             self.app.content.update_article(
-                self.handle,
-                self._current_id,
+                handle,
+                article_id,
                 title=self.title_edit.text(),
                 subtitle=self.subtitle_edit.text(),
                 lead=self.lead_edit.toPlainText(),
@@ -281,24 +283,37 @@ class ContentPage(Page):
                 approved=self.approved_check.isChecked(),
                 body=self.body_edit.toPlainText(),
             )
+
+        def undo_edit() -> None:
+            if before is not None:
+                self.app.content.restore_article(handle, before)
+
+        def action() -> None:
+            self.app.undo.do("Edit story", apply_edit, undo_edit)
             self.refresh()
-            self.status.setText("Story saved.")
+            self.status.setText("Story saved. Ctrl+Z undoes it.")
 
         run_guarded(self, "Save story", action)
 
     def _move(self, delta: int) -> None:
         if self.handle is None or self._current_id is None:
             return
-        with self.handle.uow() as uow:
-            ids = [a.id for a in uow.articles.for_project(self.handle.project_id)]
-        if self._current_id not in ids:
+        handle = self.handle
+        before = self.app.content.snapshot_order(handle)
+        if self._current_id not in before:
             return
-        index = ids.index(self._current_id)
+        index = before.index(self._current_id)
         target = index + delta
-        if not (0 <= target < len(ids)):
+        if not (0 <= target < len(before)):
             return
-        ids[index], ids[target] = ids[target], ids[index]
-        self.app.content.reorder(self.handle, ids)
+        after = list(before)
+        after[index], after[target] = after[target], after[index]
+
+        self.app.undo.do(
+            "Reorder stories",
+            lambda: self.app.content.reorder(handle, after),
+            lambda: self.app.content.reorder(handle, before),
+        )
         self.refresh()
 
     def _delete(self) -> None:
@@ -306,9 +321,21 @@ class ContentPage(Page):
             return
         if not confirm(self, "Delete story", "Remove this story from the edition?"):
             return
-        self.app.content.delete_article(self.handle, self._current_id)
+        handle, article_id = self.handle, self._current_id
+        snapshot = self.app.content.snapshot_article(handle, article_id)
+
+        def undo_delete() -> None:
+            if snapshot is not None:
+                self.app.content.restore_article(handle, snapshot)
+
+        self.app.undo.do(
+            "Delete story",
+            lambda: self.app.content.delete_article(handle, article_id),
+            undo_delete,
+        )
         self._current_id = None
         self.refresh()
+        self.status.setText("Story deleted. Ctrl+Z brings it back.")
 
     # ----------------------------------------------------------------- ai
     def _suggest_headline(self) -> None:

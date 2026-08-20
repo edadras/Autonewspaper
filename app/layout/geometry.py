@@ -235,8 +235,7 @@ def find_gaps(rects: list[Rect], area: Rect, min_ratio: float = 0.04) -> list[Ga
                 width += 1
             height = 1
             while row + height < steps_y and all(
-                not occupied[row + height][c] and not seen[row + height][c]
-                for c in range(col, col + width)
+                not occupied[row + height][c] and not seen[row + height][c] for c in range(col, col + width)
             ):
                 height += 1
             for r in range(row, row + height):

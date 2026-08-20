@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import logging
 import shutil
+import tempfile
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,33 +26,55 @@ from app.utils.files import make_archive
 from app.vision.renderer import PreviewRenderer
 
 
-def pdf_from_images(
-    images: list[Path], target: Path, source_dpi: int, target_dpi: int
-) -> Path:
-    """Write a multi-page PDF from already-rendered page images."""
+def pdf_from_images(images: list[Path], target: Path, source_dpi: int, target_dpi: int) -> Path:
+    """Write a multi-page PDF from already-rendered page images.
+
+    Pillow can only assemble a multi-page PDF from images it holds open all at
+    once, and a forty-page broadsheet at 200 dpi is more than a gigabyte of
+    decoded pixels - not something saving an edition should need in memory. So
+    each page is converted to a one-page PDF on its own, released, and the
+    single pages are stitched together with pypdf. Only one decoded page and
+    the already-compressed pages (a few megabytes for a whole edition) are ever
+    resident.
+    """
     from PIL import Image
+    from pypdf import PdfWriter
 
     target = Path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
+    if not images:
+        raise ValueError("no pages to write")
     ratio = min(1.0, target_dpi / max(1, source_dpi))
-    pages = []
-    try:
-        for path in images:
-            image = Image.open(path).convert("RGB")
+
+    def write_page(source: Path, destination: Path) -> None:
+        with Image.open(source) as opened:
+            page = opened.convert("RGB")
+        try:
             if ratio < 0.999:
-                image = image.resize(
-                    (max(1, int(image.width * ratio)), max(1, int(image.height * ratio))),
+                resized = page.resize(
+                    (
+                        max(1, int(page.width * ratio)),
+                        max(1, int(page.height * ratio)),
+                    ),
                     Image.Resampling.LANCZOS,
                 )
-            pages.append(image)
-        if not pages:
-            raise ValueError("no pages to write")
-        pages[0].save(
-            target, "PDF", resolution=float(target_dpi), save_all=True, append_images=pages[1:]
-        )
-    finally:
-        for image in pages:
-            image.close()
+                page.close()
+                page = resized
+            page.save(destination, "PDF", resolution=float(target_dpi))
+        finally:
+            page.close()
+
+    with tempfile.TemporaryDirectory(dir=str(target.parent), prefix=".pages-") as scratch:
+        writer = PdfWriter()
+        try:
+            for number, source in enumerate(images):
+                single = Path(scratch) / f"page_{number:04d}.pdf"
+                write_page(Path(source), single)
+                writer.append(str(single))
+            with open(target, "wb") as handle:
+                writer.write(handle)
+        finally:
+            writer.close()
     return target
 
 
@@ -79,6 +103,7 @@ def write_jpeg(source: Path, target: Path, quality: int = 88) -> Path:
     with Image.open(source) as image:
         image.convert("RGB").save(target, "JPEG", quality=quality, optimize=True)
     return target
+
 
 if TYPE_CHECKING:  # pragma: no cover - avoids an import cycle with app.services
     from app.services.project_manager import ProjectHandle
@@ -172,7 +197,10 @@ class ExportService:
         self.bus = bus
         self.builtin_pdf_dpi = max(72, builtin_pdf_dpi)
         self.render_workers = max(1, render_workers)
-        self._masters: tuple[int, list[Path]] | None = None
+        # One service instance is shared by the pipeline and the Export page,
+        # and an export mutates the InDesign document; two at once would
+        # interleave their scripts.
+        self._lock = threading.RLock()
 
     # ---------------------------------------------------------------- pdfs
     def export(
@@ -189,7 +217,35 @@ class ExportService:
         archive: bool = False,
     ) -> ExportResult:
         """Produce every requested deliverable."""
+        with self._lock:
+            return self._export(
+                handle,
+                plan,
+                template,
+                presets=presets,
+                export_indd=export_indd,
+                export_idml=export_idml,
+                export_previews=export_previews,
+                preview_dpi=preview_dpi,
+                archive=archive,
+            )
+
+    def _export(
+        self,
+        handle: ProjectHandle,
+        plan: LayoutPlan,
+        template: TemplateSpec,
+        *,
+        presets: list[str] | None = None,
+        export_indd: bool = True,
+        export_idml: bool = True,
+        export_previews: bool = True,
+        preview_dpi: int = 110,
+        archive: bool = False,
+    ) -> ExportResult:
+        """Body of :meth:`export`, run under the service lock."""
         result = ExportResult()
+        masters: tuple[int, list[Path]] | None = None
         output = handle.output_dir
         output.mkdir(parents=True, exist_ok=True)
         (output / "previews").mkdir(parents=True, exist_ok=True)
@@ -229,10 +285,8 @@ class ExportService:
             # Either InDesign is absent or every export attempt failed.
             result.engine = "builtin"
             if use_indesign:
-                result.warnings.append(
-                    "InDesign produced no PDF; the built-in renderer was used instead."
-                )
-            self._builtin_pdfs(handle, plan, template, wanted, available, preview_dpi, result)
+                result.warnings.append("InDesign produced no PDF; the built-in renderer was used instead.")
+            masters = self._builtin_pdfs(handle, plan, template, wanted, available, preview_dpi, result)
             result.warnings.append(
                 "The PDF was rendered by the built-in engine, not InDesign; "
                 "colour management and preflight settings are not applied."
@@ -240,7 +294,7 @@ class ExportService:
 
         if export_previews:
             result.previews = self._previews(
-                handle, plan, template, preview_dpi, use_indesign, result
+                handle, plan, template, preview_dpi, use_indesign, result, masters
             )
 
         if result.pdfs:
@@ -282,7 +336,7 @@ class ExportService:
         available: dict[str, PDFPresetSpec],
         preview_dpi: int,
         result: ExportResult,
-    ) -> None:
+    ) -> tuple[int, list[Path]]:
         """Produce every requested PDF from a single set of page renders.
 
         Rendering each page once at the highest resolution any output needs,
@@ -291,18 +345,14 @@ class ExportService:
         minute and a few seconds.
         """
         target_dpis = {
-            preset_id: min(300, available[preset_id].downsample_dpi)
-            if preset_id in available
-            else 200
+            preset_id: min(300, available[preset_id].downsample_dpi) if preset_id in available else 200
             for preset_id in wanted
         }
         # The built-in PDF is a proof; its resolution is capped so a large
         # edition does not spend minutes rasterising at press resolution.
-        master_dpi = min(
-            max([*target_dpis.values(), preview_dpi, 150]), self.builtin_pdf_dpi
-        )
+        master_dpi = min(max([*target_dpis.values(), preview_dpi, 150]), self.builtin_pdf_dpi)
         renderer = PreviewRenderer(template, dpi=master_dpi)
-        masters = self._master_renders(handle, plan, renderer, master_dpi)
+        masters = self._render_pages(handle, plan, renderer, master_dpi)
         if not masters:
             raise ExportError("The built-in renderer produced no pages to export")
 
@@ -313,11 +363,10 @@ class ExportService:
                 pdf_from_images(masters, target, master_dpi, target_dpis[preset_id])
                 result.pdfs[preset_id] = str(target)
             except Exception as exc:  # noqa: BLE001
-                raise ExportError(
-                    f"Could not produce the '{preset_id}' PDF: {exc}", cause=exc
-                ) from exc
+                raise ExportError(f"Could not produce the '{preset_id}' PDF: {exc}", cause=exc) from exc
+        return (master_dpi, masters)
 
-    def _master_renders(
+    def _render_pages(
         self,
         handle: ProjectHandle,
         plan: LayoutPlan,
@@ -327,9 +376,7 @@ class ExportService:
         """Render every page once, caching the result for this export."""
         directory = handle.directory / "previews" / f"master_{dpi}"
         directory.mkdir(parents=True, exist_ok=True)
-        targets = [
-            (page, directory / f"page_{page.index:03d}.png") for page in plan.pages
-        ]
+        targets = [(page, directory / f"page_{page.index:03d}.png") for page in plan.pages]
 
         def render(item: tuple[Any, Path]) -> Path:
             page, target = item
@@ -346,8 +393,6 @@ class ExportService:
                 paths = list(pool.map(render, targets))
         else:
             paths = [render(item) for item in targets]
-
-        self._masters = (dpi, paths)
         return paths
 
     def _collect_assets(self, handle: ProjectHandle, plan: LayoutPlan) -> list[str]:
@@ -382,6 +427,7 @@ class ExportService:
         dpi: int,
         use_indesign: bool,
         result: ExportResult,
+        masters: tuple[int, list[Path]] | None = None,
     ) -> list[str]:
         """Export a page image per page into ``output/previews``.
 
@@ -392,7 +438,6 @@ class ExportService:
         directory = handle.output_dir / "previews"
         directory.mkdir(parents=True, exist_ok=True)
         previews: list[str] = []
-        masters = self._masters
         renderer = PreviewRenderer(template, dpi=dpi)
 
         for index, page in enumerate(plan.pages):

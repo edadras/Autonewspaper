@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.core.undo import Command
 from app.services.asset_manager import IMAGE_SUFFIXES
 from app.ui.pages.base import Page
 from app.ui.widgets.common import (
@@ -228,7 +229,15 @@ class AssetsPage(Page):
         asset_id = self.table.selected_data()
         if asset_id is None or self.handle is None:
             return
-        self.app.assets.assign(self.handle, asset_id, self.assign_box.currentData())
+        handle = self.handle
+        target = self.assign_box.currentData()
+        before = self.app.assets.snapshot_assignments(handle).get(asset_id)
+
+        self.app.undo.do(
+            "Assign picture",
+            lambda: self.app.assets.assign(handle, asset_id, target),
+            lambda: self.app.assets.assign(handle, asset_id, before),
+        )
         self.refresh()
 
     def _auto_assign(self) -> None:
@@ -236,10 +245,19 @@ class AssetsPage(Page):
             return
 
         handle = self.handle
+        before = self.app.assets.snapshot_assignments(handle)
 
         def done(count) -> None:
+            self.app.undo.push(
+                Command(
+                    label="Auto-assign pictures",
+                    do=lambda: None,
+                    undo=lambda: self.app.assets.restore_assignments(handle, before),
+                ),
+                execute=False,
+            )
             self.refresh()
-            self.status.setText(f"Assigned {count} picture(s) to stories.")
+            self.status.setText(f"Assigned {count} picture(s) to stories. Ctrl+Z undoes it.")
 
         self.run_background(
             "auto-assign",
@@ -266,9 +284,7 @@ class AssetsPage(Page):
         def done(outcome) -> None:
             kind, count = outcome
             self.refresh()
-            self.status.setText(
-                f"Re-analysed {count} image(s)." if kind == "all" else "Image re-analysed."
-            )
+            self.status.setText(f"Re-analysed {count} image(s)." if kind == "all" else "Image re-analysed.")
 
         self.run_background(
             "analyse-assets",

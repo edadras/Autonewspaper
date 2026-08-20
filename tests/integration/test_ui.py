@@ -214,9 +214,7 @@ def test_a_failing_background_task_is_reported_not_raised(window, qt_app, monkey
         common, "show_error", lambda parent, title, message, detail="": reported.append(message)
     )
 
-    task = page.run_background(
-        "boom", "Deliberate failure", lambda: 1 / 0, status=page.status
-    )
+    task = page.run_background("boom", "Deliberate failure", lambda: 1 / 0, status=page.status)
     assert task is not None
     task.wait(10_000)
     qt_app.processEvents()
@@ -261,3 +259,70 @@ def test_a_project_log_file_is_written(application, project):
     logging.getLogger("app.test").warning("a line for the project log")
     assert logging_target.exists()
     assert "project log" in logging_target.read_text(encoding="utf-8", errors="replace")
+
+
+def test_editing_a_story_is_undoable(window, qt_app, application, project):
+    window.show_page("Content")
+    qt_app.processEvents()
+    page = next(p for p in window.pages if p.title == "Content")
+    page.refresh()
+    page.table.selectRow(0)
+    qt_app.processEvents()
+
+    article_id = page._current_id
+    with project.uow() as uow:
+        original = uow.articles.get(article_id).title
+
+    page.title_edit.setText("تیتر موقت")
+    page._save()
+    with project.uow() as uow:
+        assert uow.articles.get(article_id).title == "تیتر موقت"
+
+    assert application.undo.can_undo
+    application.undo.undo()
+    with project.uow() as uow:
+        assert uow.articles.get(article_id).title == original
+
+
+def test_deleting_a_story_is_undoable(window, qt_app, application, project, monkeypatch):
+    from app.ui.pages import content as content_page
+
+    monkeypatch.setattr(content_page, "confirm", lambda *args, **kwargs: True)
+    window.show_page("Content")
+    qt_app.processEvents()
+    page = next(p for p in window.pages if p.title == "Content")
+    page.refresh()
+    page.table.selectRow(0)
+    qt_app.processEvents()
+
+    article_id = page._current_id
+    page._delete()
+    with project.uow() as uow:
+        assert uow.articles.get(article_id) is None
+
+    application.undo.undo()
+    with project.uow() as uow:
+        assert uow.articles.get(article_id) is not None
+
+
+def test_assigning_a_picture_is_undoable(window, qt_app, application, project):
+    window.show_page("Assets")
+    qt_app.processEvents()
+    page = next(p for p in window.pages if p.title == "Assets")
+    page.refresh()
+    page.table.selectRow(0)
+    qt_app.processEvents()
+
+    asset_id = page.table.selected_data()
+    before = application.assets.snapshot_assignments(project)[asset_id]
+    with project.uow() as uow:
+        article_id = uow.articles.for_project(project.project_id)[0].id
+
+    index = page.assign_box.findData(article_id)
+    assert index >= 0
+    page.assign_box.setCurrentIndex(index)
+    page._assign()
+    assert application.assets.snapshot_assignments(project)[asset_id] == article_id
+
+    application.undo.undo()
+    assert application.assets.snapshot_assignments(project)[asset_id] == before

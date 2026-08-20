@@ -206,3 +206,61 @@ def test_diagnostics_run_without_a_network_or_adobe(application):
     for expected in ("Python", "SQLite", "Storage", "Permissions", "Templates", "Fonts"):
         assert expected in names
     assert all(check.status in ("ok", "info", "warning", "error") for check in report.checks)
+
+
+def test_a_story_can_be_snapshotted_and_restored(application, project):
+    """Snapshot and restore are what make an edit or a delete reversible."""
+    with project.uow() as uow:
+        article = uow.articles.for_project(project.project_id)[0]
+        article_id, original_title, original_body = article.id, article.title, article.body
+
+    snapshot = application.content.snapshot_article(project, article_id)
+    assert snapshot and snapshot["title"] == original_title
+
+    application.content.update_article(project, article_id, title="تیتر تازه")
+    with project.uow() as uow:
+        assert uow.articles.get(article_id).title == "تیتر تازه"
+
+    application.content.restore_article(project, snapshot)
+    with project.uow() as uow:
+        restored = uow.articles.get(article_id)
+    assert restored.title == original_title
+    assert restored.body == original_body
+
+
+def test_a_deleted_story_is_restored_with_its_id(application, project):
+    with project.uow() as uow:
+        article_id = uow.articles.for_project(project.project_id)[1].id
+    snapshot = application.content.snapshot_article(project, article_id)
+
+    assert application.content.delete_article(project, article_id)
+    with project.uow() as uow:
+        assert uow.articles.get(article_id) is None
+
+    restored_id = application.content.restore_article(project, snapshot)
+    assert restored_id == article_id
+    with project.uow() as uow:
+        assert uow.articles.get(article_id).title == snapshot["title"]
+
+
+def test_the_running_order_can_be_restored(application, project):
+    before = application.content.snapshot_order(project)
+    shuffled = list(reversed(before))
+    application.content.reorder(project, shuffled)
+    assert application.content.snapshot_order(project) == shuffled
+    application.content.reorder(project, before)
+    assert application.content.snapshot_order(project) == before
+
+
+def test_picture_assignments_can_be_restored(application, project):
+    before = application.assets.snapshot_assignments(project)
+    assert before
+
+    asset_id = next(iter(before))
+    with project.uow() as uow:
+        article_id = uow.articles.for_project(project.project_id)[0].id
+    application.assets.assign(project, asset_id, article_id)
+    assert application.assets.snapshot_assignments(project)[asset_id] == article_id
+
+    application.assets.restore_assignments(project, before)
+    assert application.assets.snapshot_assignments(project) == before
