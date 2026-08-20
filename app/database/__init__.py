@@ -1,6 +1,6 @@
 """Persistence layer."""
 
-from app.database.base import Base, TimestampMixin, utcnow
+from app.models.base import Base, TimestampMixin, utcnow
 from app.database.repositories import (
     ArticleRepository,
     AssetRepository,

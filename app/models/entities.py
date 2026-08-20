@@ -25,7 +25,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database.base import Base, TimestampMixin, utcnow
+from app.models.base import Base, TimestampMixin, utcnow
 
 
 class JSONMixin:

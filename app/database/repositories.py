@@ -13,7 +13,7 @@ from typing import Any, Generic, TypeVar
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from app.database.base import Base
+from app.models.base import Base
 from app.models import entities as E  # noqa: N812
 
 log = logging.getLogger(__name__)
