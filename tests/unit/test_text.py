@@ -135,3 +135,44 @@ def test_the_folio_of_a_persian_page_carries_the_jalali_date(template, article_b
     assert "۱۴۰۳" in folios[0]
     assert "مرداد" in folios[0]
     assert "2024" not in folios[0]
+
+
+class TestArabicIsNotPersianised:
+    """Arabic and Persian share an alphabet but not a spelling (§37/§38)."""
+
+    SENTENCE = "الحكومة تعلن خطة اقتصادية جديدة للعام المقبل"
+
+    def test_arabic_letters_survive_normalisation(self):
+        assert T.normalize(self.SENTENCE, "ar") == self.SENTENCE
+
+    @pytest.mark.parametrize("letter", ["ة", "ي", "ك"])
+    def test_the_letters_persian_rewrites_are_left_alone_in_arabic(self, letter):
+        assert letter in T.normalize(f"كلمة {letter} عربية", "ar")
+
+    def test_persian_still_gets_its_own_letters(self):
+        assert T.normalize("اقتصادي كرد", "fa") == "اقتصادی کرد"
+
+    def test_arabic_still_loses_invisible_marks_and_extra_spacing(self):
+        assert T.normalize("الحكومة​   تعلن", "ar") == "الحكومة تعلن"
+
+
+def test_a_left_to_right_edition_on_a_right_to_left_template_is_not_a_fault(template, article_blocks):
+    """Laying English or Turkish out on a Persian template is the §38 case.
+
+    The direction check compared each frame against the template's own
+    direction, so every frame of such an edition was reported as an RTL fault
+    and the page scored zero.
+    """
+    from app.layout.engine import LayoutEngine
+    from app.models.schemas import IssueType
+
+    for language, expected in (("tr", "ltr"), ("en", "ltr"), ("ar", "rtl"), ("fa", "rtl")):
+        engine = LayoutEngine(template, language=language)
+        plan = engine.plan_edition(1, {1: article_blocks}, page_count=1)
+        page = plan.pages[0]
+
+        report = engine.checker.check(page)
+        rtl_faults = [v for v in report.violations if v.type is IssueType.RTL_PROBLEM]
+        assert rtl_faults == [], f"{language}: {[v.message for v in rtl_faults]}"
+        assert {e.typography.direction for e in page.elements if e.typography} == {expected}
+        assert page.score > 40, f"{language} scored {page.score}"

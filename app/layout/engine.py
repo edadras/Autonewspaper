@@ -96,7 +96,7 @@ class LayoutEngine:
         self.template = template
         self.language = language or template.language
         self.typography = TypographyEngine(template, self.language)
-        self.checker = ConstraintChecker(template)
+        self.checker = ConstraintChecker(template, language=self.language)
         self.scorer = LayoutScorer(template)
         self.candidates_per_page = max(1, candidates_per_page)
         self.random = random.Random(seed)

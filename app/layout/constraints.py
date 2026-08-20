@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.layout.geometry import find_gaps, total_overlap_area
+from app.layout.typography import RTL_LANGUAGES
 from app.models.schemas import ElementSpec, IssueType, PageLayout, Rect, Severity
 from app.templates.schema import TemplateSpec
 from app.utils.units import effective_dpi
@@ -89,10 +90,21 @@ class ConstraintReport:
 class ConstraintChecker:
     """Evaluates the hard and soft constraints of a page."""
 
-    def __init__(self, template: TemplateSpec, *, overlap_tolerance: float = 0.4) -> None:
+    def __init__(
+        self,
+        template: TemplateSpec,
+        *,
+        language: str | None = None,
+        overlap_tolerance: float = 0.4,
+    ) -> None:
         self.template = template
         self.rules = template.layout_rules
         self.overlap_tolerance = overlap_tolerance
+        # The template's own direction is only the default. Laying an English
+        # or Turkish edition out on a Persian template is the mixed-direction
+        # case §38 asks for, and its frames are correctly left-to-right.
+        self.language = language or template.language
+        self.direction = "rtl" if self.language in RTL_LANGUAGES else "ltr"
 
     def check(
         self, page: PageLayout, *, asset_pixels: dict[int, tuple[int, int]] | None = None
@@ -422,7 +434,7 @@ class ConstraintChecker:
                 )
 
     def _check_direction(self, elements: list[ElementSpec], report: ConstraintReport) -> None:
-        expected = "rtl" if self.template.direction == "rtl" else "ltr"
+        expected = self.direction
         for element in elements:
             typography = element.typography
             if typography is None or not element.is_text:
@@ -434,7 +446,7 @@ class ConstraintChecker:
                         severity=Severity.HIGH,
                         message=(
                             f"'{element.frame_name}' is set {typography.direction} "
-                            f"but the template is {expected}"
+                            f"but a {self.language} page is {expected}"
                         ),
                         element_id=element.id,
                         magnitude=1.0,

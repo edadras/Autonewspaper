@@ -157,10 +157,28 @@ def normalize_persian(text: str, *, digits: bool = False, punctuation: bool = Tr
     return out.strip()
 
 
+def normalize_arabic(text: str) -> str:
+    """Normalise Arabic text without Persian-ising its letters.
+
+    The Persian rules rewrite Arabic yeh, kaf and teh marbuta into their
+    Persian counterparts, which changes how Arabic words are spelt - running
+    them over an Arabic edition turns "الحكومة" into "الحكومه". Arabic gets
+    the shared cleanup only: composition, invisible marks and whitespace.
+    """
+    if not text:
+        return ""
+    out = unicodedata.normalize("NFC", text)
+    out = out.replace("\u200b", "").replace("\ufeff", "")
+    out = _WS_RE.sub(" ", out)
+    return _MULTI_NL_RE.sub("\n\n", out).strip()
+
+
 def normalize(text: str, language: str = "fa") -> str:
     """Language-aware normalisation entry point."""
-    if language in ("fa", "ar"):
-        return normalize_persian(text, punctuation=language == "fa")
+    if language == "fa":
+        return normalize_persian(text)
+    if language in ("ar", "ur", "he"):
+        return normalize_arabic(text)
     return _MULTI_NL_RE.sub("\n\n", _WS_RE.sub(" ", unicodedata.normalize("NFC", text))).strip()
 
 
