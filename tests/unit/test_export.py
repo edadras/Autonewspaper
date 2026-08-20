@@ -13,6 +13,7 @@ from PIL import Image, ImageDraw
 from pypdf import PdfReader
 
 from app.export.exporter import pdf_from_images
+from app.vision.renderer import PreviewRenderer
 
 PAGE = (600, 900)
 SOURCE_DPI = 150
@@ -110,3 +111,25 @@ def test_no_scratch_files_are_left_beside_the_pdf(tmp_path):
 def test_an_empty_page_list_is_rejected(tmp_path):
     with pytest.raises(ValueError):
         pdf_from_images([], tmp_path / "empty.pdf", SOURCE_DPI, SOURCE_DPI)
+
+
+def test_the_builtin_renderer_writes_a_pdf_page_per_layout_page(template, article_blocks, tmp_path):
+    """The fallback PDF must cover the whole edition, not just page one."""
+    from app.layout.engine import LayoutEngine
+
+    engine = LayoutEngine(template, language="fa")
+    blocks = article_blocks
+    plan = engine.plan_edition(
+        1,
+        {1: blocks[:3], 2: blocks[3:]},
+        page_count=2,
+        publication_name="روزنامه آزمایشی",
+        edition_date="۱۴۰۳/۰۵/۰۱",
+    )
+    renderer = PreviewRenderer(template, dpi=72)
+
+    target = renderer.render_pdf(plan, tmp_path / "fallback.pdf")
+
+    assert len(PdfReader(str(target)).pages) == len(plan.pages)
+    # The rasters go to a scratch directory of their own, not next to the PDF.
+    assert [item.name for item in tmp_path.iterdir()] == ["fallback.pdf"]

@@ -13,17 +13,22 @@ The resolution order is:
 from __future__ import annotations
 
 import base64
+import functools
 import hashlib
 import hmac
 import json
 import logging
 import os
 import platform
+import time
 from pathlib import Path
 
 log = logging.getLogger(__name__)
 
 SERVICE_NAME = "AINewspaperStudio"
+
+#: Marks a portable vault that carries an authentication tag.
+_VAULT_MAGIC = b"AINSV2"
 
 try:  # pragma: no cover - depends on platform
     import keyring  # type: ignore
@@ -42,8 +47,14 @@ except Exception:  # pragma: no cover
     _DPAPI_OK = False
 
 
+@functools.lru_cache(maxsize=1)
 def _machine_key() -> bytes:
-    """Derive a machine-bound key used by the portable vault fallback."""
+    """Derive a machine-bound key used by the portable vault fallback.
+
+    The derivation is deliberately expensive, so the result is memoised: it
+    depends only on the machine, and every vault read would otherwise pay for
+    120,000 PBKDF2 rounds.
+    """
     seed = "|".join(
         [
             platform.node(),
@@ -158,14 +169,34 @@ class SecretStore:
             if _DPAPI_OK:  # pragma: no cover - Windows only
                 plain = win32crypt.CryptUnprotectData(raw, None, None, None, 0)[1]  # type: ignore[union-attr]
             else:
-                nonce, payload = raw[:16], raw[16:]
-                plain = bytes(
-                    a ^ b for a, b in zip(payload, _stream(_machine_key(), nonce, len(payload)), strict=True)
-                )
+                plain = self._decrypt(raw)
             return json.loads(plain.decode("utf-8"))
         except Exception as exc:
-            log.error("secret vault unreadable (%s); starting empty", exc)
+            # Returning an empty dict and carrying on would let the next write
+            # replace every other key the operator had stored, so the damaged
+            # file is kept instead of being silently overwritten.
+            backup = self.vault_path.with_name(f"{self.vault_path.name}.corrupt-{int(time.time())}")
+            try:
+                self.vault_path.replace(backup)
+                log.error("secret vault unreadable (%s); kept as %s", exc, backup.name)
+            except OSError:  # pragma: no cover - the vault is also unmovable
+                log.error("secret vault unreadable (%s) and could not be set aside", exc)
             return {}
+
+    @staticmethod
+    def _decrypt(raw: bytes) -> bytes:
+        """Decrypt and authenticate a portable-vault blob."""
+        key = _machine_key()
+        if raw.startswith(_VAULT_MAGIC):
+            body = raw[len(_VAULT_MAGIC) :]
+            nonce, payload, tag = body[:16], body[16:-32], body[-32:]
+            expected = hmac.new(key, _VAULT_MAGIC + nonce + payload, hashlib.sha256).digest()
+            if not hmac.compare_digest(tag, expected):
+                raise ValueError("vault authentication tag does not match")
+        else:
+            # Written by an earlier build, before the tag was added.
+            nonce, payload = raw[:16], raw[16:]
+        return bytes(a ^ b for a, b in zip(payload, _stream(key, nonce, len(payload)), strict=True))
 
     def _vault_save(self, data: dict[str, str]) -> None:
         self.vault_path.parent.mkdir(parents=True, exist_ok=True)
@@ -173,10 +204,11 @@ class SecretStore:
         if _DPAPI_OK:  # pragma: no cover - Windows only
             blob = win32crypt.CryptProtectData(plain, SERVICE_NAME, None, None, None, 0)  # type: ignore[union-attr]
         else:
+            key = _machine_key()
             nonce = os.urandom(16)
-            blob = nonce + bytes(
-                a ^ b for a, b in zip(plain, _stream(_machine_key(), nonce, len(plain)), strict=True)
-            )
+            payload = bytes(a ^ b for a, b in zip(plain, _stream(key, nonce, len(plain)), strict=True))
+            tag = hmac.new(key, _VAULT_MAGIC + nonce + payload, hashlib.sha256).digest()
+            blob = _VAULT_MAGIC + nonce + payload + tag
         tmp = self.vault_path.with_suffix(".tmp")
         tmp.write_bytes(blob)
         tmp.replace(self.vault_path)

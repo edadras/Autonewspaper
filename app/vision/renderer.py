@@ -22,6 +22,7 @@ both would reverse the text twice, so the renderer picks exactly one.
 from __future__ import annotations
 
 import logging
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,7 @@ from PIL import features as _pil_features
 
 from app.models.schemas import ElementSpec, ElementType, LayoutPlan, PageLayout
 from app.templates.schema import TemplateSpec
+from app.utils import imaging
 from app.utils.units import mm_to_px
 from app.vision.fonts import load_font
 
@@ -359,28 +361,18 @@ class PreviewRenderer:
         """
         target = Path(target)
         target.parent.mkdir(parents=True, exist_ok=True)
+        if not plan.pages:
+            raise ValueError("The layout plan has no pages")
         original_dpi = self.dpi
         if dpi:
             self.dpi = dpi
         try:
-            images: list[Image.Image] = []
-            import tempfile
-
-            with tempfile.TemporaryDirectory() as tmp:
-                for page in plan.pages:
-                    result = self.render_page(page, Path(tmp) / f"p{page.index:03d}.png")
-                    images.append(Image.open(result.path).convert("RGB"))
-                if not images:
-                    raise ValueError("The layout plan has no pages")
-                images[0].save(
-                    target,
-                    "PDF",
-                    resolution=float(self.dpi),
-                    save_all=True,
-                    append_images=images[1:],
-                )
-                for image in images:
-                    image.close()
+            with tempfile.TemporaryDirectory() as scratch:
+                rasters = [
+                    self.render_page(page, Path(scratch) / f"p{page.index:03d}.png").path
+                    for page in plan.pages
+                ]
+                imaging.write_pdf(rasters, target, self.dpi, self.dpi)
         finally:
             self.dpi = original_dpi
         log.info("Rendered %d page(s) to %s with the built-in renderer", len(plan.pages), target)

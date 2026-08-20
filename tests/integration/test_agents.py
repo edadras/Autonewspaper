@@ -263,3 +263,116 @@ def test_the_editorial_agent_leaves_the_body_alone(application, project):
     assert updated.body == original_body
     assert updated.original_title
     assert agent.restore_original_title(project, article_id)
+
+
+# --------------------------------------------------------- the QA loop bounds
+def _unreachable_page(agent_context):
+    """A page whose score the corrector cannot lift to the threshold."""
+    page = agent_context.plan.pages[0]
+    return page.model_copy(deep=True)
+
+
+def _always_correcting(agent):
+    """Make every pass claim a correction, so only the bounds stop the loop.
+
+    The loop also stops when a pass changes nothing, which is the right
+    behaviour but would mask the iteration, timeout and retry bounds these
+    tests are about.
+    """
+    from app.vision.corrector import CorrectionAction, CorrectionResult
+
+    def correct_page(page, report, **kwargs):
+        return CorrectionResult(
+            applied=[CorrectionAction(action="resize_text", element_id="x", reason="test")],
+            score_before=1.0,
+            score_after=2.0,
+        )
+
+    agent.correct_page = correct_page
+    return agent
+
+
+def test_the_qa_loop_gives_up_when_it_runs_out_of_time(application, agent_context, monkeypatch):
+    """§57: the iteration count alone does not bound wall-clock work."""
+    import app.vision.qa_agent as qa_module
+
+    clock = [0.0]
+    monkeypatch.setattr(qa_module.time, "monotonic", lambda: clock[0])
+
+    agent = VisionQAAgent(
+        agent_context.engine,
+        agent_context.template,
+        ai=application.ai,
+        threshold=101,  # unreachable, so the loop always runs to a bound
+        max_iterations=8,
+        timeout_seconds=30,
+        use_vision_model=False,
+    )
+
+    def slow_render(page):
+        clock[0] += 20.0  # each render costs twenty seconds
+        return None, None
+
+    result = _always_correcting(agent).run_loop(_unreachable_page(agent_context), slow_render)
+
+    assert not result.passed
+    assert "timed out" in result.stopped_because
+    assert len(result.iterations) < 8
+    assert result.report is not None
+
+
+def test_the_qa_loop_gives_up_on_a_renderer_that_keeps_failing(application, agent_context):
+    attempts = []
+
+    agent = VisionQAAgent(
+        agent_context.engine,
+        agent_context.template,
+        ai=application.ai,
+        threshold=101,
+        max_iterations=9,
+        timeout_seconds=600,
+        max_retries=2,
+        use_vision_model=False,
+    )
+
+    def broken_render(page):
+        attempts.append(page.index)
+        raise RuntimeError("InDesign went away")
+
+    result = _always_correcting(agent).run_loop(_unreachable_page(agent_context), broken_render)
+
+    # One good-faith attempt plus max_retries, then it stops - not nine.
+    assert len(attempts) == 3
+    assert "rendering failed" in result.stopped_because
+    assert not result.passed
+    # A geometric report is still produced, so the page is not lost.
+    assert result.report.score > 0
+
+
+def test_a_renderer_that_recovers_does_not_count_earlier_failures(application, agent_context):
+    calls = []
+
+    agent = VisionQAAgent(
+        agent_context.engine,
+        agent_context.template,
+        ai=application.ai,
+        threshold=101,
+        max_iterations=5,
+        timeout_seconds=600,
+        max_retries=1,
+        use_vision_model=False,
+    )
+
+    def flaky_render(page):
+        calls.append(len(calls))
+        if len(calls) % 2 == 1:
+            raise RuntimeError("transient")
+        return None, None
+
+    result = _always_correcting(agent).run_loop(_unreachable_page(agent_context), flaky_render)
+
+    # Failures alternate with successes, so the streak never reaches the limit
+    # and the loop runs out of iterations instead.
+    assert not result.stopped_because
+    assert len(calls) == 5
+    assert not result.passed

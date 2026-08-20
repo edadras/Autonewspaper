@@ -693,6 +693,8 @@ class Pipeline:
             ai=self.ai,
             threshold=config.layout.qa_threshold,
             max_iterations=config.layout.max_iterations,
+            timeout_seconds=config.layout.qa_timeout_seconds,
+            max_retries=config.layout.qa_max_retries,
             use_vision_model=config.ai.vision_provider != "heuristic",
             preview_dpi=config.export.preview_dpi,
         )

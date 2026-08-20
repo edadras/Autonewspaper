@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 import shutil
-import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -22,6 +21,7 @@ from app.core.errors import ExportError
 from app.core.events import EventBus, EventType
 from app.models.schemas import LayoutPlan
 from app.templates.schema import PDFPresetSpec, TemplateSpec
+from app.utils import imaging
 from app.utils.files import make_archive
 from app.vision.renderer import PreviewRenderer
 
@@ -29,53 +29,10 @@ from app.vision.renderer import PreviewRenderer
 def pdf_from_images(images: list[Path], target: Path, source_dpi: int, target_dpi: int) -> Path:
     """Write a multi-page PDF from already-rendered page images.
 
-    Pillow can only assemble a multi-page PDF from images it holds open all at
-    once, and a forty-page broadsheet at 200 dpi is more than a gigabyte of
-    decoded pixels - not something saving an edition should need in memory. So
-    each page is converted to a one-page PDF on its own, released, and the
-    single pages are stitched together with pypdf. Only one decoded page and
-    the already-compressed pages (a few megabytes for a whole edition) are ever
-    resident.
+    A thin alias for :func:`app.utils.imaging.write_pdf`; the built-in
+    renderer uses the same helper for its fallback output.
     """
-    from PIL import Image
-    from pypdf import PdfWriter
-
-    target = Path(target)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if not images:
-        raise ValueError("no pages to write")
-    ratio = min(1.0, target_dpi / max(1, source_dpi))
-
-    def write_page(source: Path, destination: Path) -> None:
-        with Image.open(source) as opened:
-            page = opened.convert("RGB")
-        try:
-            if ratio < 0.999:
-                resized = page.resize(
-                    (
-                        max(1, int(page.width * ratio)),
-                        max(1, int(page.height * ratio)),
-                    ),
-                    Image.Resampling.LANCZOS,
-                )
-                page.close()
-                page = resized
-            page.save(destination, "PDF", resolution=float(target_dpi))
-        finally:
-            page.close()
-
-    with tempfile.TemporaryDirectory(dir=str(target.parent), prefix=".pages-") as scratch:
-        writer = PdfWriter()
-        try:
-            for number, source in enumerate(images):
-                single = Path(scratch) / f"page_{number:04d}.pdf"
-                write_page(Path(source), single)
-                writer.append(str(single))
-            with open(target, "wb") as handle:
-                writer.write(handle)
-        finally:
-            writer.close()
-    return target
+    return imaging.write_pdf(images, target, source_dpi, target_dpi)
 
 
 def scale_image(source: Path, target: Path, source_dpi: int, target_dpi: int) -> Path:

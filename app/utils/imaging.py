@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import math
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -39,15 +40,77 @@ except Exception:  # pragma: no cover
 
 
 def open_image(path: Path | str) -> Image.Image:
-    """Open an image, applying EXIF orientation and converting to RGB."""
+    """Open an image, applying EXIF orientation and converting to RGB.
+
+    Both the orientation fix and the mode conversion produce a new image, so
+    each intermediate is closed as it is replaced - otherwise a batch import
+    would hold a file handle open per picture until the collector ran.
+    """
     image = Image.open(path)
     try:
-        image = ImageOps.exif_transpose(image)
+        rotated = ImageOps.exif_transpose(image)
     except Exception:  # pragma: no cover - broken EXIF
-        pass
+        rotated = image
+    if rotated is not image:
+        image.close()
+        image = rotated
     if image.mode not in ("RGB", "L"):
-        image = image.convert("RGB")
+        converted = image.convert("RGB")
+        image.close()
+        image = converted
     return image
+
+
+def write_pdf(images: list[Path], target: Path, source_dpi: int, target_dpi: int) -> Path:
+    """Stitch already-rendered page rasters into a multi-page PDF.
+
+    Pillow can only assemble a multi-page PDF from images it holds open at
+    once, and a forty-page broadsheet at 200 dpi is more than a gigabyte of
+    decoded pixels - not something saving an edition should need in memory.
+    Each page is therefore compressed on its own, released, and the single
+    pages are stitched together with pypdf, so only one decoded page and the
+    already-compressed pages (a few megabytes for a whole edition) are ever
+    resident. The bytes are identical either way.
+
+    *source_dpi* is the resolution the rasters were rendered at; pages are
+    downsampled when *target_dpi* is lower, which is how the digital and web
+    presets are produced from a single print-resolution render.
+    """
+    from pypdf import PdfWriter
+
+    target = Path(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not images:
+        raise ValueError("no pages to write")
+    ratio = min(1.0, target_dpi / max(1, source_dpi))
+
+    def write_page(source: Path, destination: Path) -> None:
+        with Image.open(source) as opened:
+            page = opened.convert("RGB")
+        try:
+            if ratio < 0.999:
+                resized = page.resize(
+                    (max(1, int(page.width * ratio)), max(1, int(page.height * ratio))),
+                    Image.Resampling.LANCZOS,
+                )
+                page.close()
+                page = resized
+            page.save(destination, "PDF", resolution=float(target_dpi))
+        finally:
+            page.close()
+
+    with tempfile.TemporaryDirectory(dir=str(target.parent), prefix=".pages-") as scratch:
+        writer = PdfWriter()
+        try:
+            for number, source in enumerate(images):
+                single = Path(scratch) / f"page_{number:04d}.pdf"
+                write_page(Path(source), single)
+                writer.append(str(single))
+            with open(target, "wb") as handle:
+                writer.write(handle)
+        finally:
+            writer.close()
+    return target
 
 
 def _sharpness(image: Image.Image) -> float:

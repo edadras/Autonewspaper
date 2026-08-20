@@ -55,6 +55,8 @@ the defaults are restored, so a bad edit never stops the application starting.
   "layout": {
     "candidates_per_page": 6,
     "max_iterations": 5,
+    "qa_timeout_seconds": 600.0,
+    "qa_max_retries": 3,
     "qa_threshold": 90.0,
     "min_body_font_pt": 7.5,
     "min_image_dpi": 200.0,
@@ -64,6 +66,8 @@ the defaults are restored, so a bad edit never stops the application starting.
   "export": {
     "default_preset": "print",
     "preview_dpi": 110,
+    "builtin_pdf_dpi": 200,
+    "render_workers": 4,
     "export_idml": true,
     "export_indd": true,
     "output_dir": null
@@ -96,6 +100,24 @@ pages will use all their correction iterations; 88–90 is a practical target.
 **`layout.max_iterations`** — how many times a page may be corrected and
 re-rendered. Each iteration costs a render, so 3–5 is the useful range. When
 the threshold is never reached the best result is kept and reported.
+
+**`layout.qa_timeout_seconds`** — the wall-clock ceiling for the correction
+loop on one page. The iteration count alone does not bound the work, because
+a render through InDesign can take minutes on a heavy document; when the
+ceiling is reached the best result so far is kept and the run says so.
+
+**`layout.qa_max_retries`** — how many consecutive render failures the loop
+tolerates before abandoning a page. It stops the loop from spending every
+iteration on a renderer that has gone away.
+
+**`export.builtin_pdf_dpi`** — the resolution the built-in renderer
+rasterises PDF pages at, used only when InDesign is unavailable. That PDF is
+a proof rather than a press file, so 200 dpi keeps it legible without the
+cost of 300. The other presets are downsampled from this single render.
+
+**`export.render_workers`** — how many pages are rasterised at once during
+export. Page rasterisation is independent work, so this scales close to
+linearly up to the number of physical cores.
 
 **`layout.candidates_per_page`** — how many compositions are built and scored
 per page. More candidates means better pages and a longer run; 6 is a good

@@ -80,6 +80,15 @@ class LayoutSettings(BaseModel):
 
     candidates_per_page: int = Field(6, ge=1, le=64)
     max_iterations: int = Field(5, ge=1, le=20)
+    qa_timeout_seconds: float = Field(600.0, gt=0)
+    """Wall-clock ceiling for the QA loop on a single page (§57).
+
+    The iteration count alone does not bound the work: rendering a page
+    through InDesign can take minutes on a heavy document, so a page that is
+    not converging is abandoned with its best result so far.
+    """
+    qa_max_retries: int = Field(3, ge=0, le=10)
+    """Consecutive render failures tolerated before the QA loop gives up."""
     qa_threshold: float = Field(90.0, ge=0, le=100)
     min_body_font_pt: float = Field(7.5, gt=0)
     min_image_dpi: float = Field(200.0, gt=0)

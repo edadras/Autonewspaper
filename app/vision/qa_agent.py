@@ -10,12 +10,14 @@ even when the threshold is never reached.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from app.ai.registry import AIService
+from app.core.errors import VisionQAError
 from app.layout.engine import LayoutEngine
 from app.models.schemas import (
     EditionQAReport,
@@ -66,6 +68,8 @@ class LoopResult:
     report: QAReport
     iterations: list[IterationRecord] = field(default_factory=list)
     passed: bool = False
+    stopped_because: str = ""
+    """Why the loop ended early, when it did - a timeout or a failing renderer."""
 
     @property
     def best_score(self) -> float:
@@ -80,6 +84,7 @@ class LoopResult:
             "passed": self.passed,
             "issues": [issue.model_dump(mode="json") for issue in self.report.issues],
             "iterations": [record.to_dict() for record in self.iterations],
+            "stopped_because": self.stopped_because,
         }
 
 
@@ -94,6 +99,8 @@ class VisionQAAgent:
         ai: AIService | None = None,
         threshold: float = 90.0,
         max_iterations: int = 5,
+        timeout_seconds: float = 600.0,
+        max_retries: int = 3,
         use_vision_model: bool = True,
         preview_dpi: int = 110,
     ) -> None:
@@ -102,6 +109,8 @@ class VisionQAAgent:
         self.ai = ai
         self.threshold = threshold
         self.max_iterations = max(1, max_iterations)
+        self.timeout_seconds = max(10.0, timeout_seconds)
+        self.max_retries = max(0, max_retries)
         self.use_vision_model = use_vision_model
         self.analyzer = PageAnalyzer(preview_dpi)
         self.corrector = LayoutCorrector(engine)
@@ -315,13 +324,32 @@ class VisionQAAgent:
         best_page = page.model_copy(deep=True)
         best_report: QAReport | None = None
         records: list[IterationRecord] = []
+        started = time.monotonic()
+        render_failures = 0
+        stopped = ""
 
         for iteration in range(1, self.max_iterations + 1):
+            # §57: iterations are not the only bound. A page rendered through
+            # InDesign can take minutes, so the loop also watches the clock and
+            # gives up on a renderer that keeps failing, keeping the best result
+            # it has instead of retrying forever.
+            elapsed = time.monotonic() - started
+            if iteration > 1 and elapsed > self.timeout_seconds:
+                stopped = f"timed out after {elapsed:.0f}s"
+                log.warning("Page %d QA %s; keeping the best result", page.index, stopped)
+                break
             try:
                 preview, indesign_report = render(page)
+                render_failures = 0
             except Exception as exc:  # noqa: BLE001 - QA must degrade, not crash
+                render_failures += 1
                 log.error("Rendering page %d failed on iteration %d: %s", page.index, iteration, exc)
                 preview, indesign_report = None, None  # type: ignore[assignment]
+                if render_failures > self.max_retries:
+                    stopped = f"rendering failed {render_failures} times in a row"
+                    log.error("Page %d QA abandoned: %s", page.index, stopped)
+                    if best_report is not None:
+                        break
 
             report = self.analyze_page(
                 page,
@@ -382,18 +410,26 @@ class VisionQAAgent:
                 )
                 break
 
-        assert best_report is not None
+        if best_report is None:
+            # Every iteration failed to render and nothing was ever analysed.
+            raise VisionQAError(
+                f"Page {page.index} could not be analysed: {stopped or 'no iteration produced a report'}",
+                context={"page": page.index, "iterations": len(records)},
+            )
         log.warning(
-            "Page %d did not reach the QA threshold (%.1f < %.1f) after %d iteration(s); "
+            "Page %d did not reach the QA threshold (%.1f < %.1f) after %d iteration(s)%s; "
             "keeping the best result",
             page.index,
             best_report.score,
             self.threshold,
             len(records),
+            f" ({stopped})" if stopped else "",
         )
         best_page.qa_score = best_report.score
         best_page.iterations = len(records)
-        return LoopResult(page=best_page, report=best_report, iterations=records, passed=False)
+        return LoopResult(
+            page=best_page, report=best_report, iterations=records, passed=False, stopped_because=stopped
+        )
 
     def edition_report(self, reports: list[QAReport], project_id: int, iteration: int = 0) -> EditionQAReport:
         """Aggregate per-page reports into an edition report."""
