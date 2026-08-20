@@ -19,7 +19,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 from app.design.plan import Box, DesignPlan, Layer, LayerKind, ShapeKind
 from app.vision.fonts import load_font
@@ -83,15 +83,27 @@ class DesignRenderer:
                 drawn = self._fade(drawn, group.opacity)
             image.alpha_composite(drawn)
             previous = drawn
-        flat = Image.new("RGB", size, _rgba(canvas.background, 100)[:3])
-        flat.paste(image, (0, 0), image)
-        image.close()
+        # A canvas asked to be transparent stays transparent. Flattening it
+        # would put a black rectangle behind every piece of furniture, which
+        # is exactly what a decorated box must not do.
+        if _rgba(canvas.background, 100)[3] < 255:
+            out = image
+        else:
+            out = Image.new("RGB", size, _rgba(canvas.background, 100)[:3])
+            out.paste(image, (0, 0), image)
+            image.close()
         if target is not None:
             path = Path(target)
             path.parent.mkdir(parents=True, exist_ok=True)
-            flat.save(path)
+            if out.mode == "RGBA" and path.suffix.lower() in (".jpg", ".jpeg"):
+                # JPEG cannot hold an alpha channel; say so rather than
+                # writing a black-backed file the operator has to discover.
+                raise ValueError(
+                    f"'{path.name}' is transparent and cannot be written as JPEG; use PNG or TIFF"
+                )
+            out.save(path)
             log.info("Rendered '%s' to %s", self.plan.name or "design", path)
-        return flat
+        return out
 
     def render_to(self, target: Path | str) -> Path:
         """Draw the design and return the path written."""
@@ -390,18 +402,40 @@ class DesignRenderer:
             {"color": spec.get("to", "#ffffff"), "location": 100, "opacity": 100},
         ]
         ordered = sorted(stops, key=lambda stop: float(stop.get("location", 0)))
+        angle = float(spec.get("angle", 90))
         width, height = image.size
+        # The gradient belongs to the layer, not to the canvas: computing it
+        # over the whole image leaves a layer smaller than the canvas seeing
+        # only the middle slice of the ramp, which is why a caption bar had a
+        # hard edge where it should have faded to nothing.
+        box = layer.box
+        box_left = box.x * self.scale
+        box_top = box.y * self.scale
+        box_width = max(1.0, box.width * self.scale)
+        box_height = max(1.0, box.height * self.scale)
         # The ramp has to cover the diagonal so a rotation leaves no corner
         # unpainted.
         span = int(math.ceil(math.hypot(width, height))) or 1
+        # The ramp has to be as long as the diagonal so a rotation leaves no
+        # corner unpainted, but the gradient must *complete* over the box's
+        # own extent along the gradient axis - otherwise the crop keeps only
+        # the middle third of the ramp and the result is nearly flat.
+        radians = math.radians(angle)
+        extent = (abs(box_width * math.cos(radians)) + abs(box_height * math.sin(radians))) or 1.0
+        # Where the box sits along the gradient axis, measured from the centre
+        # of the canvas, so the ramp lines up with the layer after rotation.
+        offset = (box_left + box_width / 2 - width / 2) * math.cos(radians) - (
+            box_top + box_height / 2 - height / 2
+        ) * math.sin(radians)
+        start = (span - extent) / 2 + offset
         ramp = Image.new("RGBA", (span, 1))
-        ramp.putdata([self._sample(ordered, x / max(1, span - 1)) for x in range(span)])
+        ramp.putdata([self._sample(ordered, max(0.0, min(1.0, (x - start) / extent))) for x in range(span)])
         gradient = ramp.resize((span, span), Image.Resampling.NEAREST)
         ramp.close()
-        angle = float(spec.get("angle", 90))
-        # Photoshop measures the angle anticlockwise from the positive x axis,
-        # and the ramp runs left to right, so the image rotates the other way.
-        rotated = gradient.rotate(-angle, resample=Image.Resampling.BILINEAR, expand=False)
+        # Photoshop measures the angle anticlockwise from the positive x axis:
+        # 0 runs left to right, 90 runs bottom to top. The preview has to agree
+        # with it or the same plan comes out mirrored in the two engines.
+        rotated = gradient.rotate(angle, resample=Image.Resampling.BILINEAR, expand=False)
         gradient.close()
         left = (rotated.width - width) // 2
         top = (rotated.height - height) // 2
@@ -410,9 +444,17 @@ class DesignRenderer:
 
         out = image.copy()
         faded = self._fade(cropped, float(spec.get("opacity", 100)))
-        out.paste(faded, (0, 0), image.getchannel("A"))
+        # The mask is the shape's own alpha multiplied by the gradient's:
+        # pasting through the shape alone throws the per-stop opacity away, so
+        # a caption bar meant to fade to nothing comes out a flat block.
+        mask = ImageChops.multiply(image.getchannel("A"), faded.getchannel("A"))
+        out.paste(faded, (0, 0), mask)
+        # The result carries the gradient's transparency too, not only its
+        # colour, or the layer would be opaque wherever the shape is.
+        out.putalpha(mask)
         cropped.close()
         faded.close()
+        mask.close()
         return out
 
     @staticmethod
