@@ -365,7 +365,73 @@ class PageAnalyzer:
                         detected_by="indesign",
                     )
                 )
+            issues.extend(_type_fidelity_issues(item, page, frame_id))
+
+        for font in report.get("fonts") or []:
+            # A font InDesign cannot find is substituted silently on screen
+            # and comes out wrong on press, which is exactly the kind of thing
+            # nobody notices until it is printed.
+            issues.append(
+                QAIssue(
+                    type=IssueType.RTL_PROBLEM
+                    if any(mark in str(font.get("name", "")) for mark in ("Sans", "IRAN", "Vazir"))
+                    else IssueType.LOW_READABILITY,
+                    severity=Severity.CRITICAL,
+                    page_index=page.index,
+                    message=(
+                        f"The font '{font.get('name')}' is {str(font.get('status', '')).split('.')[-1].lower()}; "
+                        "InDesign has substituted another face"
+                    ),
+                    suggestion="Install the font, or change the template to one that is available.",
+                    detected_by="indesign",
+                )
+            )
         return issues
+
+
+def _type_fidelity_issues(item: dict[str, Any], page: PageLayout, frame_id: str) -> list[QAIssue]:
+    """Differences between the type asked for and the type InDesign applied."""
+    issues: list[QAIssue] = []
+    element = page.element(frame_id) or next((e for e in page.elements if e.frame_name == frame_id), None)
+    if element is None or element.typography is None:
+        return issues
+    wanted = element.typography
+
+    applied = item.get("point_size")
+    if applied is not None and abs(float(applied) - wanted.size_pt) > 0.25:
+        issues.append(
+            QAIssue(
+                type=IssueType.SMALL_FONT,
+                severity=Severity.MEDIUM,
+                element_id=frame_id,
+                page_index=page.index,
+                message=(
+                    f"'{frame_id}' was set at {float(applied):g} pt, not the "
+                    f"{wanted.size_pt:g} pt it was given"
+                ),
+                suggestion="A paragraph style in the document may be overriding the plan.",
+                detected_by="indesign",
+            )
+        )
+    font = str(item.get("font") or "")
+    if font and wanted.font_family:
+        squeeze = font.lower().replace(" ", "").replace("\t", "")
+        family = wanted.font_family.lower().replace(" ", "")
+        if family not in squeeze and not any(
+            fallback.lower().replace(" ", "") in squeeze for fallback in wanted.fallback_fonts
+        ):
+            issues.append(
+                QAIssue(
+                    type=IssueType.LOW_READABILITY,
+                    severity=Severity.HIGH,
+                    element_id=frame_id,
+                    page_index=page.index,
+                    message=f"'{frame_id}' is set in {font}, not {wanted.font_family}",
+                    suggestion=f"Install {wanted.font_family}, or choose an available face.",
+                    detected_by="indesign",
+                )
+            )
+    return issues
 
 
 def score_from_issues(base: float, issues: list[QAIssue]) -> float:

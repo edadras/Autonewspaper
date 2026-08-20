@@ -41,12 +41,35 @@ class ShapeKind(str, Enum):
 
 
 class Box(BaseModel):
-    """A rectangle in pixels, measured from the top-left of the canvas."""
+    """A rectangle in **pixels**, measured from the top-left of the canvas.
+
+    Pixels, not millimetres: Photoshop works in them and so does every screen
+    format. For a print piece it is far too easy to write the millimetres one
+    is thinking in and get a headline a fifteenth of the size it should be, so
+    :meth:`from_mm` exists to say which is meant, and the quality check
+    reports a layer small enough to look like that mistake.
+    """
 
     x: float = 0.0
     y: float = 0.0
     width: float = 0.0
     height: float = 0.0
+
+    @classmethod
+    def from_mm(cls, x: float, y: float, width: float, height: float, dpi: int) -> Box:
+        """A box given in millimetres, converted at *dpi*."""
+        scale = dpi / 25.4
+        return cls(x=x * scale, y=y * scale, width=width * scale, height=height * scale)
+
+    def to_mm(self, dpi: int) -> dict[str, float]:
+        """This box in millimetres, for reporting to a print operator."""
+        scale = 25.4 / max(1, dpi)
+        return {
+            "x": round(self.x * scale, 2),
+            "y": round(self.y * scale, 2),
+            "width": round(self.width * scale, 2),
+            "height": round(self.height * scale, 2),
+        }
 
     @property
     def right(self) -> float:
@@ -286,6 +309,10 @@ class DesignPlan(BaseModel):
                 safe_box=safe_box,
             ),
         )
+
+    def mm(self, x: float, y: float, width: float, height: float) -> Box:
+        """A box given in millimetres, at this canvas's resolution."""
+        return Box.from_mm(x, y, width, height, self.canvas.dpi)
 
     def add(self, layer: Layer) -> Layer:
         """Append a layer, giving it the next painting order."""

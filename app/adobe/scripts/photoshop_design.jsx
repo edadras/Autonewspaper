@@ -23,7 +23,7 @@ AINS.PSD = (function () {
 
     /* ------------------------------------------------------------ helpers */
 
-    api.reset = function () { registry = {}; return true; };
+    api.reset = function () { registry = {}; api.substitutions = []; return true; };
 
     api.doc = function () { return AINS.PS.doc(); };
 
@@ -212,12 +212,23 @@ AINS.PSD = (function () {
     };
 
     /* PostScript name for a family/style, falling back through the list. */
+    /* Fonts that were asked for and not found, so the report can say so
+     * rather than the design quietly coming out in something else. */
+    api.substitutions = [];
+
     api.resolveFont = function (family, style, fallbacks) {
         var wanted = [family].concat(fallbacks || []);
         for (var i = 0; i < wanted.length; i++) {
             var match = api.findFont(wanted[i], style);
-            if (match) { return match; }
+            if (match) {
+                if (i > 0) {
+                    api.substitutions.push({ asked: String(family), got: String(wanted[i]), postscript: match });
+                    AINS.log("Font '" + family + "' is not installed; using '" + wanted[i] + "'");
+                }
+                return match;
+            }
         }
+        api.substitutions.push({ asked: String(family), got: null, postscript: null });
         AINS.log("Font '" + family + "' is not installed; Photoshop's default is used");
         return null;
     };
@@ -668,7 +679,14 @@ AINS.PSD = (function () {
     api.designReport = function () {
         var document = api.doc();
         var previous = api.pixelUnits();
-        var out = { width: document.width.as("px"), height: document.height.as("px"), layers: [] };
+        var out = {
+            width: document.width.as("px"),
+            height: document.height.as("px"),
+            resolution: document.resolution,
+            mode: String(document.mode).replace("DocumentMode.", "").toLowerCase(),
+            font_substitutions: api.substitutions,
+            layers: []
+        };
         try {
             function walk(collection, group) {
                 for (var i = 0; i < collection.length; i++) {
@@ -685,10 +703,21 @@ AINS.PSD = (function () {
                         var b = api.bounds(layer);
                         entry.x = b.x; entry.y = b.y; entry.width = b.width; entry.height = b.height;
                     } catch (e) { entry.bounds_error = String(e); }
+                    entry.blend_mode = String(layer.blendMode).replace("BlendMode.", "").toLowerCase();
                     if (String(layer.kind) === "LayerKind.TEXT") {
                         try {
-                            entry.text = String(layer.textItem.contents);
-                            entry.size_pt = layer.textItem.size.as("pt");
+                            var item = layer.textItem;
+                            entry.text = String(item.contents);
+                            entry.size_pt = item.size.as("pt");
+                            entry.font = String(item.font);
+                            entry.tracking = item.tracking;
+                            entry.alignment = String(item.justification)
+                                .replace("Justification.", "").toLowerCase();
+                            try { entry.leading_pt = item.useAutoLeading ? null : item.leading.as("pt"); }
+                            catch (e) { entry.leading_pt = null; }
+                            try {
+                                entry.color = "#" + String(item.color.rgb.hexValue).toLowerCase();
+                            } catch (e) { entry.color = null; }
                         } catch (e) { entry.text_error = String(e); }
                     }
                     out.layers.push(entry);

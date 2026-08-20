@@ -274,3 +274,94 @@ def test_a_frame_that_really_rendered_nothing_is_still_caught(template, article_
 
     issues = analyzer.issues_from_pixels(metrics, page)
     assert any(i.type is IssueType.EMPTY_FRAME and i.element_id == body.id for i in issues)
+
+
+# ------------------------------------ what InDesign applied, not what we asked
+def _indesign_report(page, frame_id, **overrides):
+    """A page report shaped the way the InDesign library produces one."""
+    element = next(e for e in page.elements if e.frame_name == frame_id or e.id == frame_id)
+    typography = element.typography
+    item = {
+        "id": frame_id,
+        "kind": "TextFrame",
+        "x": element.rect.x,
+        "y": element.rect.y,
+        "width": element.rect.width,
+        "height": element.rect.height,
+        "overflows": False,
+        "characters": len(element.text),
+        "point_size": typography.size_pt,
+        "font": typography.font_family,
+        "tracking": typography.tracking,
+        "alignment": typography.alignment,
+    }
+    item.update(overrides)
+    return {"page": page.index, "items": [item], "fonts": []}
+
+
+def test_type_indesign_actually_applied_is_compared_with_what_was_asked(template, article_blocks):
+    """A style in the document can override the plan, silently."""
+    from app.vision.analyzer import PageAnalyzer
+
+    engine = LayoutEngine(template, language="fa")
+    page = engine.plan_edition(1, {1: article_blocks}, page_count=1).pages[0]
+    body = next(e for e in page.elements if e.type is ElementType.BODY)
+
+    clean = PageAnalyzer().issues_from_indesign(_indesign_report(page, body.frame_name), page)
+    assert clean == []
+
+    drifted = PageAnalyzer().issues_from_indesign(
+        _indesign_report(page, body.frame_name, point_size=body.typography.size_pt - 2), page
+    )
+    assert any("not the" in issue.message for issue in drifted)
+
+
+def test_a_font_indesign_swapped_is_reported(template, article_blocks):
+    from app.vision.analyzer import PageAnalyzer
+
+    engine = LayoutEngine(template, language="fa")
+    page = engine.plan_edition(1, {1: article_blocks}, page_count=1).pages[0]
+    body = next(e for e in page.elements if e.type is ElementType.BODY)
+
+    issues = PageAnalyzer().issues_from_indesign(
+        _indesign_report(page, body.frame_name, font="Minion Pro"), page
+    )
+    assert any("Minion Pro" in issue.message for issue in issues)
+
+
+def test_a_declared_fallback_is_not_reported_as_a_swap(template, article_blocks):
+    from app.vision.analyzer import PageAnalyzer
+
+    engine = LayoutEngine(template, language="fa")
+    page = engine.plan_edition(1, {1: article_blocks}, page_count=1).pages[0]
+    body = next(e for e in page.elements if e.type is ElementType.BODY)
+    fallback = body.typography.fallback_fonts[0]
+
+    issues = PageAnalyzer().issues_from_indesign(_indesign_report(page, body.frame_name, font=fallback), page)
+    assert not [i for i in issues if "not" in i.message and fallback in i.message]
+
+
+def test_a_font_the_document_is_missing_is_critical(template, article_blocks):
+    """It substitutes silently on screen and comes out wrong on press."""
+    from app.models.schemas import Severity
+    from app.vision.analyzer import PageAnalyzer
+
+    engine = LayoutEngine(template, language="fa")
+    page = engine.plan_edition(1, {1: article_blocks}, page_count=1).pages[0]
+    report = {"page": 1, "items": [], "fonts": [{"name": "IRANSans", "status": "FontStatus.NOT_AVAILABLE"}]}
+
+    issues = PageAnalyzer().issues_from_indesign(report, page)
+    assert len(issues) == 1
+    assert issues[0].severity is Severity.CRITICAL
+    assert "IRANSans" in issues[0].message and "substituted" in issues[0].message
+
+
+def test_the_indesign_library_reports_what_it_applied():
+    """The comparison is only possible if the report carries it."""
+    from app.adobe.jsx import SCRIPTS_DIR
+
+    source = (SCRIPTS_DIR / "indesign_lib.jsx").read_text(encoding="utf-8")
+    report = source[source.index("api.pageReport = function") :][:2400]
+    for field in ("point_size", "font", "font_status", "tracking", "alignment", "leading"):
+        assert f"entry.{field}" in report, field
+    assert "api.fontProblems = function" in source

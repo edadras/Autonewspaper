@@ -595,7 +595,22 @@ AINS.ID = (function () {
             if (item.constructor.name === "TextFrame") {
                 entry.overflows = item.overflows;
                 entry.characters = item.parentStory.characters.length;
-                try { entry.point_size = item.parentStory.characters[0].pointSize; } catch (e) {}
+                /* What was actually applied, not what was asked for: a font
+                 * that is not installed, a size InDesign rounded or a colour
+                 * outside the gamut all come back here so the difference can
+                 * be reported rather than discovered on the printed sheet. */
+                try {
+                    var first = item.parentStory.characters[0];
+                    entry.point_size = first.pointSize;
+                    entry.leading = (first.leading === Leading.AUTO) ? null : first.leading;
+                    entry.font = String(first.appliedFont.name);
+                    entry.font_status = String(first.appliedFont.status);
+                    entry.tracking = first.tracking;
+                    entry.style = String(item.parentStory.paragraphs[0].appliedParagraphStyle.name);
+                    entry.alignment = String(item.parentStory.paragraphs[0].justification)
+                        .replace("Justification.", "").toLowerCase();
+                    try { entry.color = String(first.fillColor.name); } catch (e) {}
+                } catch (e) { entry.type_error = String(e); }
             }
             if (item.constructor.name === "Rectangle" && item.graphics.length > 0) {
                 var graphic = item.graphics[0];
@@ -608,7 +623,22 @@ AINS.ID = (function () {
             }
             out.push(entry);
         }
-        return { page: pageIndex, items: out };
+        return { page: pageIndex, items: out, fonts: api.fontProblems() };
+    };
+
+    /* Fonts the document asks for that this machine does not have. */
+    api.fontProblems = function () {
+        var problems = [];
+        try {
+            var fonts = api.doc().fonts;
+            for (var i = 0; i < fonts.length; i++) {
+                var status = String(fonts[i].status);
+                if (status !== "FontStatus.INSTALLED") {
+                    problems.push({ name: String(fonts[i].name), status: status });
+                }
+            }
+        } catch (e) { AINS.log("Font status is unavailable: " + e); }
+        return problems;
     };
 
     api.linkReport = function () {
