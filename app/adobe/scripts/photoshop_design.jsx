@@ -464,6 +464,54 @@ AINS.PSD = (function () {
         }
     };
 
+    /* Reverse a layer's shape out of the one beneath it.
+     *
+     * The shape becomes a hole rather than a mark, so whatever is under the
+     * layer beneath shows through it - a headline knocked out of a band over
+     * a photograph. Photoshop has no single command for this, so it is done
+     * the way a retoucher does it: load the shape as a selection, hide that
+     * selection behind a layer mask on the layer below, and switch the shape
+     * layer off so only the hole it made remains.
+     */
+    api.knockOut = function (name, beneathName) {
+        var document = app.activeDocument;
+        var shape = api.require(name);
+        var beneath = api.require(beneathName);
+        try {
+            /* The shape's own transparency, as a selection. */
+            var loadDesc = new ActionDescriptor();
+            var target = new ActionReference();
+            target.putProperty(cid("Chnl"), cid("fsel"));
+            loadDesc.putReference(cid("null"), target);
+            var source = new ActionReference();
+            source.putEnumerated(cid("Chnl"), cid("Chnl"), cid("Trsp"));
+            source.putIdentifier(cid("Lyr "), shape.id);
+            loadDesc.putReference(cid("T   "), source);
+            executeAction(cid("setd"), loadDesc, DialogModes.NO);
+
+            /* Hide it behind a mask on the layer below. */
+            document.activeLayer = beneath;
+            var maskDesc = new ActionDescriptor();
+            maskDesc.putClass(cid("Nw  "), cid("Chnl"));
+            var at = new ActionReference();
+            at.putEnumerated(cid("Chnl"), cid("Chnl"), cid("Msk "));
+            maskDesc.putReference(cid("At  "), at);
+            maskDesc.putEnumerated(cid("Usng"), cid("UsrM"), cid("HdSl"));
+            executeAction(cid("Mk  "), maskDesc, DialogModes.NO);
+            document.selection.deselect();
+
+            /* The shape did its work as a stencil; showing it as well would
+             * fill the hole back in. It is kept rather than deleted so the
+             * operator can adjust the wording and remake the mask. */
+            shape.visible = false;
+            return { knocked_out: true, name: name, beneath: beneathName };
+        } catch (e) {
+            AINS.log("Could not knock '" + name + "' out of '" + beneathName + "': " + e);
+            try { app.activeDocument.selection.deselect(); } catch (ignored) {}
+            return { knocked_out: false, name: name, error: String(e) };
+        }
+    };
+
     /* ------------------------------------------------------- layer finish */
 
     api.finishLayer = function (layer, spec) {
@@ -639,6 +687,10 @@ AINS.PSD = (function () {
         var made = [];
         var failed = [];
         var layers = plan.layers || [];
+        /* The last layer something can be reversed out of. A knockout does
+         * not become one itself: two headlines in a row both cut into the
+         * band, not into each other. */
+        var previousName = null;
         /* Painting order: the plan lists back to front, which is the order
          * Photoshop stacks new layers in. */
         for (var i = 0; i < layers.length; i++) {
@@ -651,6 +703,19 @@ AINS.PSD = (function () {
                 else if (spec.kind === "image") { result = api.placeFile(spec); }
                 else { throw new Error("Unknown layer kind '" + spec.kind + "'"); }
                 if (spec.clip_to_below === true) { api.clipToBelow(result.name); }
+                if (spec.knockout === true) {
+                    /* The layer it was told to cut into, or the one beneath
+                     * it. Being told matters: a kicker between the headline
+                     * and its band would otherwise take the hole. */
+                    var into = spec.knockout_of ? String(spec.knockout_of) : previousName;
+                    if (!into) {
+                        AINS.log("'" + spec.name + "' asks to be reversed out with nothing beneath it");
+                    } else {
+                        result.knockout = api.knockOut(result.name, into);
+                    }
+                } else {
+                    previousName = result.name;
+                }
                 made.push(result);
             } catch (e) {
                 /* One layer failing must not lose the rest of the design. */

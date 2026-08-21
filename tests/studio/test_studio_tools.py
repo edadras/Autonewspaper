@@ -6,7 +6,7 @@ import threading
 from pathlib import Path
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from app.agents.studio_tools import (
     Artefact,
@@ -666,3 +666,149 @@ def test_an_aspect_that_is_not_one_is_refused(studio_context, photograph, tmp_pa
 
     assert not result.ok
     assert "aspect" in result.error
+
+
+# ------------------------------------------------------------ compositing --
+
+
+def test_a_surface_is_laid_over_the_design(studio_context) -> None:
+    """Flat colour is what makes a design look like a computer made it."""
+    registry = build_design_tools(studio_context)
+    registry.invoke("start_design", {"name": "d", "format": "A5", "background": "#c2410c"})
+
+    result = registry.invoke("add_texture", {"design": "d", "kind": "paper"})
+
+    assert result.ok, result.error
+    assert result.data["blend_mode"] == "multiply", "a paper texture is not a normal layer"
+    assert result.data["strength"] > 0
+    assert Path(result.data["path"]).exists()
+
+
+def test_a_surface_can_be_confined_to_one_layer(studio_context) -> None:
+    registry = build_design_tools(studio_context)
+    registry.invoke("start_design", {"name": "d", "format": "A5"})
+    registry.invoke(
+        "add_shape",
+        {"design": "d", "name": "panel", "shape": "rectangle", "x": 10, "y": 10,
+         "width": 50, "height": 30, "units": "percent", "color": "#101828"},
+    )
+
+    result = registry.invoke(
+        "add_texture", {"design": "d", "kind": "grain", "name": "tooth", "over": "panel"}
+    )
+
+    assert result.ok
+    plan = studio_context.board.design("d")
+    assert plan.layer("tooth").clip_to_below, "it is held to the panel it covers"
+    assert plan.layer("tooth").box.width == plan.layer("panel").box.width
+
+
+def test_a_surface_over_a_layer_that_is_not_there_is_refused(studio_context) -> None:
+    registry = build_design_tools(studio_context)
+    registry.invoke("start_design", {"name": "d", "format": "A5"})
+
+    result = registry.invoke("add_texture", {"design": "d", "kind": "grain", "over": "nowhere"})
+
+    assert not result.ok
+    assert "nowhere" in result.error
+
+
+def test_type_is_reversed_out_of_the_layer_it_was_told_to_cut(studio_context) -> None:
+    """A kicker between the headline and its band must not take the hole."""
+    registry = build_design_tools(studio_context)
+    registry.invoke("start_design", {"name": "d", "format": "A5"})
+    registry.invoke(
+        "add_shape",
+        {"design": "d", "name": "band", "shape": "rectangle", "x": 0, "y": 50,
+         "width": 100, "height": 30, "units": "percent", "color": "#101828", "depth": "front"},
+    )
+    registry.invoke(
+        "add_text",
+        {"design": "d", "name": "kicker", "text": "kicker", "x": 6, "y": 52,
+         "width": 88, "height": 5, "units": "percent", "depth": "top"},
+    )
+    registry.invoke(
+        "add_text",
+        {"design": "d", "name": "head", "text": "HEAD", "x": 6, "y": 58,
+         "width": 88, "height": 16, "units": "percent", "depth": "top"},
+    )
+
+    result = registry.invoke("reverse_out", {"design": "d", "layer": "head", "out_of": "band"})
+
+    assert result.ok, result.error
+    assert result.data["reversed_out_of"] == "band"
+    layer = studio_context.board.design("d").layer("head")
+    assert layer.knockout
+    assert layer.knockout_of == "band", "the target has to survive to the renderer"
+
+
+def test_reversing_out_the_bottom_layer_is_refused(studio_context) -> None:
+    registry = build_design_tools(studio_context)
+    registry.invoke("start_design", {"name": "d", "format": "A5"})
+    registry.invoke(
+        "add_text",
+        {"design": "d", "name": "only", "text": "x", "x": 0, "y": 0,
+         "width": 50, "height": 10, "units": "percent"},
+    )
+
+    result = registry.invoke("reverse_out", {"design": "d", "layer": "only"})
+
+    assert not result.ok
+    assert "nothing for it to be reversed out of" in result.error
+
+
+def test_a_hole_cannot_be_cut_in_a_hole(studio_context) -> None:
+    registry = build_design_tools(studio_context)
+    registry.invoke("start_design", {"name": "d", "format": "A5"})
+    for name in ("band", "first", "second"):
+        registry.invoke(
+            "add_shape",
+            {"design": "d", "name": name, "shape": "rectangle", "x": 0, "y": 10,
+             "width": 80, "height": 20, "units": "percent"},
+        )
+    registry.invoke("reverse_out", {"design": "d", "layer": "first", "out_of": "band"})
+
+    result = registry.invoke("reverse_out", {"design": "d", "layer": "second", "out_of": "first"})
+
+    assert not result.ok
+    assert "hole" in result.error
+
+
+def test_the_reversed_headline_lets_the_picture_through(studio_context, tmp_path) -> None:
+    """End to end: the pixels, not the flags."""
+    stripes = tmp_path / "stripes.png"
+    picture = Image.new("RGB", (900, 600))
+    drawing = ImageDraw.Draw(picture)
+    for x in range(0, 900, 40):
+        drawing.rectangle([x, 0, x + 20, 600], fill=(240, 180, 40))
+    picture.save(stripes)
+
+    registry = build_design_tools(studio_context)
+    registry.invoke("start_design", {"name": "d", "format": "900x600 px", "background": "#ffffff"})
+    registry.invoke(
+        "place_photo",
+        {"design": "d", "name": "photo", "path": str(stripes), "x": 0, "y": 0,
+         "width": 100, "height": 100, "units": "percent", "depth": "background"},
+    )
+    registry.invoke(
+        "add_shape",
+        {"design": "d", "name": "band", "shape": "rectangle", "x": 0, "y": 34,
+         "width": 100, "height": 32, "units": "percent", "color": "#101828", "depth": "front"},
+    )
+    registry.invoke(
+        "add_text",
+        {"design": "d", "name": "head", "text": "THROUGH", "x": 5, "y": 38,
+         "width": 90, "height": 22, "units": "percent", "color": "#ffffff",
+         "alignment": "center", "depth": "top"},
+    )
+    registry.invoke("reverse_out", {"design": "d", "layer": "head", "out_of": "band"})
+
+    built = registry.invoke("build_in_photoshop", {"design": "d"})
+
+    assert built.ok, built.error
+    with Image.open(built.data["path"]) as image:
+        flat = image.convert("RGB")
+        middle = flat.height // 2
+        row = [flat.getpixel((x, middle)) for x in range(80, 820)]
+    assert any(pixel == (240, 180, 40) for pixel in row), "the picture does not show through"
+    assert any(abs(pixel[2] - 40) < 14 and pixel[0] < 40 for pixel in row), "the band is gone"

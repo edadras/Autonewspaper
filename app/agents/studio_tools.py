@@ -36,6 +36,7 @@ from app.design.fidelity import DesignFidelity
 from app.design.furniture import Furniture, FurnitureFactory, FurnitureSpec
 from app.design.plan import Box, DesignPlan, Effects, Layer, LayerKind, ShapeKind
 from app.design.renderer import DesignRenderer, fit_to_box, measure_text
+from app.design.textures import Texture, TextureFactory, TextureSpec
 from app.formats.registry import FormatRegistry
 from app.layout.engine import LayoutEngine
 from app.models.schemas import ElementSpec, ElementType, LayoutPlan, PageLayout, Rect
@@ -226,6 +227,7 @@ class StudioContext:
     _locks: dict[str, threading.RLock] = field(default_factory=dict, repr=False)
     _lock_guard: threading.RLock = field(default_factory=threading.RLock, repr=False)
     _furniture: Any = field(default=None, repr=False)
+    _textures: Any = field(default=None, repr=False)
     _documents: Any = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
@@ -549,6 +551,69 @@ def build_design_tools(
             ],
             capability="design.write",
             handler=lambda **kwargs: _add_furniture(context, author, **kwargs),
+            verifier=verify_truthy,
+        )
+    )
+
+    registry.register(
+        Tool(
+            name="add_texture",
+            description=(
+                "Lay a surface over the design - paper fibre, film grain, a halftone "
+                "screen, a vignette, a risograph mottle. Flat colour is what makes a "
+                "design look like a computer made it; this is the layer that stops it. "
+                "Each surface comes with the blend mode and strength it is meant to be "
+                "used at unless you say otherwise."
+            ),
+            parameters=[
+                Parameter("design", "string", "Which design"),
+                Parameter("name", "string", "Layer name", required=False, default="surface"),
+                Parameter("kind", "string", "Which surface", choices=[t.value for t in Texture]),
+                Parameter("color", "string", "What it is made of", required=False, default="#000000"),
+                Parameter(
+                    "opacity", "number",
+                    "How strong; leave out for the strength this surface wants",
+                    required=False, minimum=1, maximum=100,
+                ),
+                Parameter(
+                    "scale", "number", "How coarse; two is twice the grain size",
+                    required=False, minimum=0.1, maximum=8.0,
+                ),
+                Parameter("angle", "number", "For a halftone screen or a weave", required=False,
+                          minimum=0, maximum=180),
+                Parameter("blend_mode", "string", "Override the mode it is laid on with", required=False),
+                Parameter(
+                    "over", "string",
+                    "Which layer it covers: 'all' for the whole sheet, or a layer name to "
+                    "cover just that one",
+                    required=False, default="all",
+                ),
+            ],
+            capability="design.write",
+            handler=lambda **kwargs: _add_texture(context, author, **kwargs),
+            verifier=verify_truthy,
+        )
+    )
+
+    registry.register(
+        Tool(
+            name="reverse_out",
+            description=(
+                "Knock a layer's shape out of the one beneath it, so what is under that "
+                "shows through. This is how a headline is reversed out of a band laid over "
+                "a photograph - the letters become holes rather than white type."
+            ),
+            parameters=[
+                Parameter("design", "string", "Which design"),
+                Parameter("layer", "string", "The layer to reverse out - usually the type"),
+                Parameter(
+                    "out_of", "string",
+                    "The layer it is punched through; the one just beneath it by default",
+                    required=False, default="",
+                ),
+            ],
+            capability="design.write",
+            handler=lambda design, layer, out_of="": _reverse_out(context, design, layer, out_of),
             verifier=verify_truthy,
         )
     )
@@ -896,18 +961,11 @@ def _default_size(box: Box, dpi: int) -> float:
 
 
 def _replace(plan: DesignPlan, layer: Layer) -> Layer:
-    """Add a layer, replacing an existing one of the same name.
-
-    The painting order is reapplied after the plan has taken the layer:
-    :meth:`DesignPlan.add` treats a falsy ``z`` as "not set" and restacks the
-    layer on top, and the front of the ``normal`` band is legitimately zero.
-    """
-    wanted = layer.z
+    """Add a layer, replacing an existing one of the same name."""
     existing = plan.layer(layer.name)
     if existing is not None:
         plan.layers.remove(existing)
     plan.add(layer)
-    layer.z = wanted
     return layer
 
 
@@ -1160,6 +1218,136 @@ def _aspect(text: str) -> float:
     if value <= 0:
         raise ToolValidationError(f"'{text}' is not an aspect this studio can use")
     return value
+
+
+def _add_texture(
+    context: StudioContext,
+    author: str,
+    design: str,
+    kind: str,
+    name: str = "surface",
+    color: str = "#000000",
+    opacity: float | None = None,
+    scale: float | None = None,
+    angle: float | None = None,
+    blend_mode: str = "",
+    over: str = "all",
+) -> dict[str, Any]:
+    """Generate a surface and lay it over the design."""
+    plan = context.board.design(design)
+    texture = Texture(kind)
+    if over and over != "all":
+        target = plan.layer(over)
+        if target is None:
+            raise ToolValidationError(
+                f"'{design}' has no layer called '{over}'",
+                context={"layers": [item.name for item in plan.layers]},
+            )
+        box = target.box
+        depth = target.z + 1
+    else:
+        box = plan.canvas.box
+        depth = _depth(plan, "top")
+
+    spec = TextureSpec(
+        kind=texture,
+        width_px=max(2, int(round(box.width))),
+        height_px=max(2, int(round(box.height))),
+        color=_hex(color, "color"),
+        opacity=float(opacity or 0.0),
+        scale=float(scale or 1.0),
+        angle=float(angle if angle is not None else 45.0),
+        seed=design,
+    )
+    path = _texture_factory(context).make(spec)
+    layer = Layer(
+        name=name,
+        kind=LayerKind.IMAGE,
+        box=box.model_copy(),
+        path=str(path),
+        fit="stretch",
+        blend_mode=blend_mode or spec.blend_mode,
+        role=f"texture:{texture.value}",
+        clip_to_below=bool(over and over != "all"),
+        z=depth,
+    )
+    _replace(plan, layer)
+    context.board.publish(
+        Artefact(
+            name=f"{design}:{name}",
+            kind="file",
+            path=str(path),
+            author=author,
+            detail={"texture": texture.value},
+        )
+    )
+    report = _layer_report(plan, layer)
+    report.update(
+        {
+            "texture": texture.value,
+            "path": str(path),
+            "blend_mode": layer.blend_mode,
+            "strength": spec.strength,
+            "over": over,
+        }
+    )
+    return report
+
+
+def _texture_factory(context: StudioContext) -> TextureFactory:
+    """The surface factory for this run, made once for its cache."""
+    with context._lock_guard:  # noqa: SLF001 - the context's own guard
+        if context._textures is None:  # noqa: SLF001
+            context._textures = TextureFactory(context.workspace / "textures")  # noqa: SLF001
+        return context._textures  # noqa: SLF001
+
+
+def _reverse_out(
+    context: StudioContext, design: str, layer: str, out_of: str
+) -> dict[str, Any]:
+    """Make a layer a hole in the one beneath it."""
+    plan = context.board.design(design)
+    target = plan.layer(layer)
+    if target is None:
+        raise ToolValidationError(
+            f"'{design}' has no layer called '{layer}'",
+            context={"layers": [item.name for item in plan.layers]},
+        )
+    order = [item for item in plan.ordered() if item.kind is not LayerKind.GROUP]
+    position = order.index(target)
+
+    if out_of:
+        beneath = plan.layer(out_of)
+        if beneath is None:
+            raise ToolValidationError(f"'{design}' has no layer called '{out_of}'")
+        if beneath.z >= target.z:
+            # Restack rather than refuse: the intent is unambiguous, and a
+            # knockout that sits under what it cuts is not a knockout.
+            target.z = beneath.z + 1
+    elif position == 0:
+        raise ToolValidationError(
+            f"'{layer}' is the bottom layer, so there is nothing for it to be reversed "
+            "out of. Put a band or a panel under it first."
+        )
+    else:
+        beneath = order[position - 1]
+
+    if beneath.knockout:
+        raise ToolValidationError(
+            f"'{beneath.name}' is itself reversed out of something; a hole cannot be cut "
+            "in a hole"
+        )
+    target.knockout = True
+    target.knockout_of = beneath.name
+    return {
+        "design": design,
+        "layer": layer,
+        "reversed_out_of": beneath.name,
+        "note": (
+            "The letters are now holes in "
+            f"'{beneath.name}', so whatever is under it shows through them."
+        ),
+    }
 
 
 def _style_layer(context: StudioContext, design: str, layer: str, **effects: Any) -> dict[str, Any]:

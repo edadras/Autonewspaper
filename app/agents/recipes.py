@@ -20,6 +20,7 @@ from typing import Any
 
 from app.agents.autonomous import AgentStep
 from app.creative.style import StyleBrief, readable_on, shift
+from app.design.textures import Texture
 
 log = logging.getLogger(__name__)
 
@@ -860,3 +861,195 @@ def title_card(
         ]
     )
     return Recipe(name=f"title card '{design}'", calls=calls)
+
+
+# ----------------------------------------------------------- compositing ---
+
+
+def composite_cover(
+    *,
+    design: str,
+    format: str,  # noqa: A002 - the tool's own argument name
+    sheet: Sheet,
+    headline: str,
+    kicker: str = "",
+    detail: str = "",
+    photo: str = "",
+    subject: str = "",
+    brief: StyleBrief | None = None,
+    language: str = "fa",
+    texture: str = Texture.PAPER.value,
+) -> Recipe:
+    """The cover a picture desk builds, rather than a photograph with type on it.
+
+    The photograph fills the sheet; the subject is cut out of it and set back
+    down over a band, with a halo in the accent colour so it lifts off; the
+    headline is reversed *out* of the band, so the picture shows through the
+    letters; and a surface over the whole thing stops it looking like flat
+    colour. Each of those is a separate decision a designer makes, and each is
+    a separate tool call here.
+    """
+    colours = Palette.from_brief(brief)
+    rtl = language in ("fa", "ar", "he", "ur")
+    align = "right" if rtl else "left"
+    margin = 8.0
+    calls: list[Call] = [
+        ("start_design", {"name": design, "format": format, "background": colours.ground}),
+    ]
+
+    if photo:
+        calls.append(
+            (
+                "place_photo",
+                {
+                    "design": design,
+                    "name": "photograph",
+                    "path": photo,
+                    "x": 0,
+                    "y": 0,
+                    "width": 100,
+                    "height": 100,
+                    "units": "percent",
+                    "fit": "cover",
+                    "role": "subject",
+                    "depth": "background",
+                },
+            )
+        )
+    if subject:
+        # Cut the subject off its background before it is placed, so the halo
+        # follows the shoulders rather than the edge of a rectangle.
+        calls.extend(
+            [
+                (
+                    "prepare_photo",
+                    {"path": subject, "name": f"{design}_subject", "cut_out": True},
+                ),
+                (
+                    "place_photo",
+                    {
+                        "design": design,
+                        "name": "cutout",
+                        "path": f"{design}_subject",
+                        "x": 8,
+                        "y": 14,
+                        "width": 84,
+                        "height": 62,
+                        "units": "percent",
+                        "fit": "contain",
+                        "role": "subject",
+                        "depth": "front",
+                    },
+                ),
+                (
+                    "style_layer",
+                    {
+                        "design": design,
+                        "layer": "cutout",
+                        "stroke": {"color": colours.accent, "size": 22, "opacity": 100},
+                        "shadow": {
+                            "color": "#000000",
+                            "opacity": 45,
+                            "distance": 10,
+                            "size": 40,
+                            "angle": 120,
+                        },
+                    },
+                ),
+            ]
+        )
+
+    calls.append(
+        (
+            "add_shape",
+            {
+                "design": design,
+                "name": "band",
+                "shape": "rectangle",
+                "x": 0,
+                "y": 62,
+                "width": 100,
+                "height": 26,
+                "units": "percent",
+                "color": colours.ground,
+                "role": "scrim",
+                "depth": "front",
+            },
+        )
+    )
+    if kicker:
+        calls.append(
+            (
+                "add_text",
+                {
+                    "design": design,
+                    "name": "kicker",
+                    "text": kicker,
+                    "x": margin,
+                    "y": 64,
+                    "width": 100 - margin * 2,
+                    "height": 4.0,
+                    "units": "percent",
+                    "color": colours.accent,
+                    "alignment": align,
+                    "tracking": 140,
+                    "role": "kicker",
+                    "depth": "top",
+                },
+            )
+        )
+    calls.extend(
+        [
+            (
+                "add_text",
+                {
+                    "design": design,
+                    "name": "headline",
+                    "text": headline,
+                    "x": margin,
+                    "y": 69,
+                    "width": 100 - margin * 2,
+                    "height": 13,
+                    "units": "percent",
+                    "color": colours.ink,
+                    "alignment": align,
+                    "tracking": -15,
+                    "role": "headline",
+                    "depth": "top",
+                },
+            ),
+            # The letters become holes in the band, so the photograph runs
+            # through them. This is the move the whole composite is built for.
+            ("reverse_out", {"design": design, "layer": "headline", "out_of": "band"}),
+        ]
+    )
+    if detail:
+        calls.append(
+            (
+                "add_text",
+                {
+                    "design": design,
+                    "name": "detail",
+                    "text": detail,
+                    "x": margin,
+                    "y": 83,
+                    "width": 100 - margin * 2,
+                    "height": 4.5,
+                    "units": "percent",
+                    "color": shift(colours.ink, lighten=-0.1),
+                    "alignment": align,
+                    "role": "body",
+                    "depth": "top",
+                },
+            )
+        )
+    calls.extend(
+        [
+            ("add_texture", {"design": design, "name": "stock", "kind": texture}),
+            ("check_design", {"design": design}),
+            ("render_design", {"design": design}),
+            ("build_in_photoshop", {"design": design, "export_as": "png"}),
+            ("save_design", {"design": design}),
+        ]
+    )
+    return Recipe(name=f"composite cover '{design}'", calls=calls)

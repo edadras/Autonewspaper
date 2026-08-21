@@ -272,3 +272,104 @@ def test_the_paper_colour_is_taken_from_the_reference_when_it_names_one() -> Non
     palette = recipes.Palette.from_brief(brief)
 
     assert palette.paper == "#efe9dd"
+
+
+# ------------------------------------------------------------ compositing --
+
+
+def test_the_composite_cover_cuts_the_subject_out_before_placing_it(formats) -> None:
+    """A halo has to follow the shoulders, not the edge of a rectangle."""
+    sheet = recipes.Sheet.resolve(formats, "A4")
+    recipe = recipes.composite_cover(
+        design="c", format="A4", sheet=sheet, headline="H",
+        photo="/tmp/bg.jpg", subject="/tmp/subject.jpg",
+    )
+
+    order = [(name, call) for name, call in recipe.calls]
+    prepared = next(index for index, (name, _) in enumerate(order) if name == "prepare_photo")
+    placed = next(
+        index
+        for index, (name, call) in enumerate(order)
+        if name == "place_photo" and call["name"] == "cutout"
+    )
+
+    assert prepared < placed, "the subject is cut out before it is set down"
+    assert order[prepared][1]["cut_out"] is True
+    assert order[placed][1]["path"] == order[prepared][1]["name"], "it places what it prepared"
+
+
+def test_the_composite_cover_gives_the_cut_out_a_halo(formats) -> None:
+    sheet = recipes.Sheet.resolve(formats, "A4")
+    recipe = recipes.composite_cover(
+        design="c", format="A4", sheet=sheet, headline="H", subject="/tmp/s.jpg"
+    )
+
+    style = next(
+        call for name, call in recipe.calls if name == "style_layer" and call["layer"] == "cutout"
+    )
+
+    assert style["stroke"]["size"] > 0, "the halo is a stroke on the cut-out"
+    assert style["shadow"], "and it lifts off the sheet"
+
+
+def test_the_composite_cover_reverses_the_headline_out_of_its_band(formats) -> None:
+    sheet = recipes.Sheet.resolve(formats, "A4")
+    recipe = recipes.composite_cover(design="c", format="A4", sheet=sheet, headline="H")
+
+    reverse = next(call for name, call in recipe.calls if name == "reverse_out")
+
+    assert reverse["layer"] == "headline"
+    assert reverse["out_of"] == "band", "not whatever happens to be beneath it"
+    played = _play(recipe)
+    assert played.index("add_shape") < played.index("reverse_out")
+
+
+def test_the_composite_cover_finishes_with_a_surface(formats) -> None:
+    sheet = recipes.Sheet.resolve(formats, "A4")
+    recipe = recipes.composite_cover(design="c", format="A4", sheet=sheet, headline="H")
+
+    played = _play(recipe)
+
+    assert "add_texture" in played
+    assert played.index("add_texture") < played.index("build_in_photoshop")
+
+
+def test_a_brief_with_two_pictures_is_routed_to_a_composite(studio_context, photograph) -> None:
+    from app.agents.studio import ArtDirector, Brief
+
+    director = ArtDirector(formats=studio_context.formats)
+
+    concept = director.plan(
+        Brief(
+            request="something striking",
+            format="A4",
+            title="t",
+            references=[str(photograph), str(photograph)],
+        )
+    )
+
+    assert concept.assignments[0].recipe.name.startswith("composite cover")
+
+
+def test_a_brief_that_asks_for_a_cover_gets_one(studio_context, photograph) -> None:
+    from app.agents.studio import ArtDirector, Brief
+
+    director = ArtDirector(formats=studio_context.formats)
+
+    concept = director.plan(
+        Brief(request="یک کاور برای مجله", format="A4", title="t", references=[str(photograph)])
+    )
+
+    assert concept.assignments[0].recipe.name.startswith("composite cover")
+
+
+def test_a_plain_poster_brief_still_gets_a_poster(studio_context, photograph) -> None:
+    from app.agents.studio import ArtDirector, Brief
+
+    director = ArtDirector(formats=studio_context.formats)
+
+    concept = director.plan(
+        Brief(request="یک پوستر برای کنسرت", format="A3", title="t", references=[str(photograph)])
+    )
+
+    assert concept.assignments[0].recipe.name.startswith("poster")

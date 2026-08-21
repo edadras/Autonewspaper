@@ -68,13 +68,42 @@ class DesignRenderer:
         groups: dict[str, Layer] = {
             layer.name: layer for layer in self.plan.layers if layer.kind is LayerKind.GROUP
         }
-        previous: Image.Image | None = None
-        for layer in self.plan.ordered():
-            if layer.kind is LayerKind.GROUP:
+        order = [layer for layer in self.plan.ordered() if layer.kind is not LayerKind.GROUP]
+        # A knockout is resolved with the layer beneath it *before* either is
+        # composited: compositing is not invertible, so punching a hole in the
+        # canvas afterwards would take out the photograph under the band as
+        # well - which is the thing the reversed type is meant to reveal.
+        knockouts: dict[str, list[Layer]] = {}
+        drawable: list[Layer] = []
+        names = {layer.name for layer in order}
+        for layer in order:
+            if not layer.knockout:
+                drawable.append(layer)
                 continue
+            # The layer it was told to cut into, or the one beneath it. Being
+            # told matters: a kicker between the headline and its band would
+            # otherwise take the hole meant for the band.
+            wanted = layer.knockout_of if layer.knockout_of in names else ""
+            beneath = wanted or (drawable[-1].name if drawable else "")
+            if not beneath:
+                # Nothing to cut into. Drawn rather than dropped: a headline
+                # that silently disappears is worse than one drawn plainly.
+                log.warning("'%s' is reversed out of nothing; it is drawn instead", layer.name)
+                drawable.append(layer)
+                continue
+            knockouts.setdefault(beneath, []).append(layer)
+
+        previous: Image.Image | None = None
+        for layer in drawable:
             drawn = self._draw_layer(layer, size)
             if drawn is None:
                 continue
+            for cut in knockouts.get(layer.name, ()):
+                shape = self._draw_layer(cut, size)
+                if shape is None:
+                    continue
+                drawn = self._knock_out(drawn, shape)
+                shape.close()
             if layer.clip_to_below and previous is not None:
                 # Clipping to the layer below keeps only what overlaps it.
                 drawn = self._clip(drawn, previous)
@@ -318,6 +347,20 @@ class DesignRenderer:
         faded = image.copy()
         faded.putalpha(alpha)
         return faded
+
+    @staticmethod
+    def _knock_out(beneath: Image.Image, shape: Image.Image) -> Image.Image:
+        """Punch *shape* out of the layer beneath it.
+
+        Type reversed out of a band: the letters become holes, so whatever is
+        under the band shows through them.
+        """
+        holed = beneath.copy()
+        hole = ImageChops.subtract(beneath.getchannel("A"), shape.getchannel("A"))
+        holed.putalpha(hole)
+        hole.close()
+        beneath.close()
+        return holed
 
     @staticmethod
     def _clip(image: Image.Image, below: Image.Image) -> Image.Image:

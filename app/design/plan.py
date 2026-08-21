@@ -135,6 +135,16 @@ class Layer(BaseModel):
     rotation: float = 0.0
     group: str | None = None
     clip_to_below: bool = False
+    """Show only where the layer beneath shows - a photograph poured into
+    type, or masked by a shape."""
+    knockout: bool = False
+    """Punch this layer's shape *out* of the one beneath instead of drawing
+    it. Type reversed out of a band, with whatever is under the band showing
+    through the letters."""
+    knockout_of: str = ""
+    """Which layer the hole goes in. Empty means the one immediately beneath,
+    which is right when the type sits straight on its band and wrong as soon
+    as a kicker comes between them."""
     effects: Effects = Field(default_factory=Effects)
     locked: bool = False
     role: str = ""
@@ -190,6 +200,8 @@ class Layer(BaseModel):
             "rotation": self.rotation,
             "group": self.group,
             "clip_to_below": self.clip_to_below,
+            "knockout": self.knockout,
+            "knockout_of": self.knockout_of,
         }
         if not self.effects.is_empty():
             payload["effects"] = {k: v for k, v in self.effects.model_dump().items() if v}
@@ -315,8 +327,15 @@ class DesignPlan(BaseModel):
         return Box.from_mm(x, y, width, height, self.canvas.dpi)
 
     def add(self, layer: Layer) -> Layer:
-        """Append a layer, giving it the next painting order."""
-        if not layer.z:
+        """Append a layer, giving it the next painting order if it has none.
+
+        "Has none" means the caller never set one, not that the one they set
+        is zero: the front of a band is legitimately zero, and treating it as
+        unset silently restacks the layer on top of everything - which is a
+        very hard bug to see, because the design is right and only the order
+        is wrong.
+        """
+        if "z" not in layer.model_fields_set:
             layer.z = (max((existing.z for existing in self.layers), default=0)) + 10
         self.layers.append(layer)
         return layer

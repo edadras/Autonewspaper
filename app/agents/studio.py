@@ -447,14 +447,26 @@ class ArtDirector:
                 "ویدئو", "نماهنگ", "تایم‌لپس",
             )
         )
-        paged = any(
+        # Two kinds of paged word. One names a *structure* - a page, a spread,
+        # a column - and always means InDesign. The other names a
+        # *publication*, and "a cover for a magazine" is a cover: the magazine
+        # is what the cover is for, not what is being made.
+        structural = any(
             word in text
             for word in (
-                "newspaper", "magazine", "page", "spread", "brochure", "catalogue",
-                "catalog", "indesign", "issue", "editorial", "column",
-                "روزنامه", "مجله", "صفحه", "نشریه", "بروشور", "کاتالوگ",
+                "page", "spread", "pages", "indesign", "column", "columns", "layout",
+                "صفحه", "صفحات", "ستون", "صفحه‌آرایی",
             )
         )
+        publication = any(
+            word in text
+            for word in (
+                "newspaper", "magazine", "brochure", "catalogue", "catalog", "issue",
+                "editorial", "journal",
+                "روزنامه", "مجله", "نشریه", "بروشور", "کاتالوگ",
+            )
+        )
+        paged = structural or (publication and not _wants_a_composite(brief))
         flat = any(
             word in text
             for word in (
@@ -539,6 +551,26 @@ class ArtDirector:
                     language=brief.language,
                 )
                 goal = f"Build the feature image '{artwork_name}' the page will place"
+            elif _wants_a_composite(brief):
+                # Two pictures, or a brief that asks for a cover: the subject
+                # comes off its background and the headline is reversed out of
+                # the band it sits on, which is a different piece of work from
+                # a poster with a photograph behind it.
+                artwork_name = f"{stem}_cover"
+                sheet = self._sheet(item, rtl=brief.language in ("fa", "ar"))
+                recipe = recipes.composite_cover(
+                    design=artwork_name,
+                    format=item,
+                    sheet=sheet,
+                    headline=parts["headline"],
+                    kicker=parts["kicker"],
+                    detail=parts["detail"],
+                    photo=photo,
+                    subject=brief.references[1] if len(brief.references) > 1 else photo,
+                    brief=style,
+                    language=brief.language,
+                )
+                goal = f"Composite the cover '{artwork_name}' at {item}"
             else:
                 artwork_name = f"{stem}_poster"
                 sheet = self._sheet(item, rtl=brief.language in ("fa", "ar"))
@@ -738,6 +770,24 @@ def _format_options(hosts: list[str]) -> list[Option]:
         Option("Instagram post, 1080x1080", "A feed post."),
         Option("Instagram story, 1080x1920", "Full screen on a phone."),
     ]
+
+
+#: Words that name the kind of piece a picture desk builds rather than a
+#: poster with a photograph behind it.
+_COMPOSITE_WORDS = (
+    "cover", "composite", "cut out", "cut-out", "cutout", "montage", "collage",
+    "portrait", "masthead", "front page",
+    "کاور", "جلد", "ترکیب", "کلاژ", "پرتره", "مونتاژ",
+)
+
+
+def _wants_a_composite(brief: Brief) -> bool:
+    """Whether this brief calls for a built cover rather than a poster."""
+    if len(brief.references) > 1:
+        # A background and a subject: there is something to cut out.
+        return True
+    text = f"{brief.request} {brief.title}".lower()
+    return any(word in text for word in _COMPOSITE_WORDS)
 
 
 def _slug(text: str, limit: int = 32) -> str:
