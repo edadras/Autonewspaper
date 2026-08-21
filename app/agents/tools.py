@@ -257,6 +257,16 @@ class ToolRegistry:
         self._emit(EventType.ADOBE_COMMAND, tool=name, arguments=cleaned)
         try:
             data = tool.handler(**cleaned)
+        except ToolValidationError as exc:
+            # A handler can only decide some things once it has looked: that a
+            # transition needs a clip on either side of the cut, that the named
+            # layer is not on this design. That is the agent making a mistake
+            # it can recover from, not the system failing, so it is reported
+            # the same way a schema refusal is - without a stack trace.
+            log.info("Tool '%s' refused: %s", name, exc.message)
+            return self._record(
+                ToolResult(name, False, error=exc.message, duration=time.monotonic() - started)
+            )
         except PermissionDeniedError as exc:
             return self._record(
                 ToolResult(name, False, error=exc.message, duration=time.monotonic() - started)

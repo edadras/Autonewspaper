@@ -475,3 +475,57 @@ class DesignRenderer:
                 b = _rgba(str(right.get("color", "#ffffff")), float(right.get("opacity", 100)))
                 return tuple(int(a[i] + (b[i] - a[i]) * weight) for i in range(4))  # type: ignore[return-value]
         return _rgba(str(stops[-1].get("color", "#ffffff")), float(stops[-1].get("opacity", 100)))
+
+
+def measure_text(plan: DesignPlan, layer: Layer) -> dict[str, Any]:
+    """How much room a text layer's copy actually needs.
+
+    Reports the wrapped line count, the widest line and how far the block
+    overruns its box as a fraction - zero when it fits.
+    """
+    return DesignRenderer(plan)._measure_text(layer)  # noqa: SLF001 - the same package
+
+
+def fit_to_box(
+    plan: DesignPlan,
+    layer: Layer,
+    *,
+    min_pt: float = 6.0,
+    max_pt: float = 800.0,
+    start_pt: float | None = None,
+) -> float:
+    """The largest type size at which this layer's copy fits its box.
+
+    Set on the layer as well as returned. A headline that runs off the sheet
+    is the single most obvious sign that a machine made a poster, so a size
+    nobody asked for explicitly is chosen by measuring rather than guessed
+    from the box height.
+
+    Binary search rather than stepping down: the measurement costs a text
+    layout each time, and a headline can start twenty times too large.
+    """
+    if not layer.text.strip() or layer.box.height <= 0 or layer.box.width <= 0:
+        return layer.size_pt
+    ratio = (layer.leading_pt / layer.size_pt) if layer.size_pt and layer.leading_pt else 1.2
+    ceiling = min(max_pt, layer.box.height / max(1, plan.canvas.dpi) * 72.0)
+    low, high = float(min_pt), max(float(min_pt), float(start_pt or ceiling))
+
+    def fits(size: float) -> bool:
+        layer.size_pt = size
+        layer.leading_pt = round(size * ratio, 2)
+        measured = measure_text(plan, layer)
+        return measured["overflow"] <= 0.0 and measured["measured_width"] <= layer.box.width + 1.0
+
+    if fits(high):
+        return layer.size_pt
+    for _ in range(18):
+        if high - low <= 0.25:
+            break
+        middle = (low + high) / 2
+        if fits(middle):
+            low = middle
+        else:
+            high = middle
+    layer.size_pt = round(low, 1)
+    layer.leading_pt = round(low * ratio, 2)
+    return layer.size_pt

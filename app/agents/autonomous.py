@@ -120,9 +120,14 @@ class AutonomousAgent:
         timeout_seconds: float = 900.0,
         max_retries: int = 3,
         fallback: Callable[[list[AgentStep]], AgentStep | None] | None = None,
+        system_prompt: str | None = None,
     ) -> None:
         self.ai = ai
         self.registry = registry
+        #: The agent's standing instructions. A caller with its own idea of
+        #: what this agent is - a studio specialist, say - supplies one;
+        #: otherwise it operates a newspaper page.
+        self.system_prompt = system_prompt or SYSTEM_PROMPT
         self.max_iterations = max(1, max_iterations)
         self.timeout_seconds = max(10.0, timeout_seconds)
         self.max_retries = max(0, max_retries)
@@ -141,7 +146,7 @@ class AutonomousAgent:
         started = time.monotonic()
         run = AgentRun(goal=goal)
         transcript: list[ChatMessage] = [
-            ChatMessage("system", SYSTEM_PROMPT.replace("{tools}", self.registry.describe())),
+            ChatMessage("system", self.system_prompt.replace("{tools}", self.registry.describe())),
             ChatMessage("user", _initial_message(goal, context)),
         ]
         consecutive_failures = 0
@@ -243,13 +248,14 @@ class AutonomousAgent:
             metadata={"task": "agent_step", "data": {"goal": run.goal}},
         )
         payload: Any = None
-        try:
-            response = self.ai._complete(request, purpose="agent step")  # noqa: SLF001
-            payload = response.json(required=False)
-        except AppError as exc:
-            log.warning("Agent step %d: provider error (%s)", index, exc.message)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("Agent step %d failed: %s", index, exc)
+        if self.ai is not None:
+            try:
+                response = self.ai._complete(request, purpose="agent step")  # noqa: SLF001
+                payload = response.json(required=False)
+            except AppError as exc:
+                log.warning("Agent step %d: provider error (%s)", index, exc.message)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Agent step %d failed: %s", index, exc)
 
         step = _parse_step(index, payload)
         if step is not None:
@@ -258,7 +264,7 @@ class AutonomousAgent:
             fallback_step = self.fallback(run.steps)
             if fallback_step is not None:
                 fallback_step.index = index
-                log.info("Agent step %d taken from the deterministic planner", index)
+                log.debug("Agent step %d taken from the deterministic planner", index)
                 return fallback_step
         return None
 

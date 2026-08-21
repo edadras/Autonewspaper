@@ -103,6 +103,7 @@ class FidelityReport:
             "host": self.host,
             "checked": self.checked,
             "faithful": self.faithful,
+            "summary": self.summary(),
             "differences": [d.to_dict() for d in self.differences],
         }
 
@@ -224,6 +225,8 @@ class DesignFidelity:
                         suggestion="Use plan.mm(x, y, width, height) if those were millimetres.",
                     )
                 )
+            if layer.kind.value == "text" and layer.text.strip():
+                self._check_fit(layer, out)
             safe = self.plan.canvas.safe_box
             if safe is not None and layer.role in ("headline", "kicker", "body", "cta"):
                 if not safe.contains(layer.box, tolerance=2.0):
@@ -239,6 +242,37 @@ class DesignFidelity:
                         )
                     )
         return out
+
+    def _check_fit(self, layer: Layer, out: FidelityReport) -> None:
+        """Whether the copy actually fits the box it was given.
+
+        Type running off the sheet is the most visible way a design fails, and
+        it is entirely measurable before anything is built.
+        """
+        from app.design.renderer import measure_text
+
+        try:
+            measured = measure_text(self.plan, layer)
+        except Exception as exc:  # noqa: BLE001 - a missing font is not a fidelity fault
+            log.debug("'%s' could not be measured: %s", layer.name, exc)
+            return
+        overflow = float(measured["overflow"])
+        if overflow <= 0.0:
+            return
+        out.differences.append(
+            Difference(
+                layer=layer.name,
+                attribute="fit",
+                asked=f"{layer.box.height:.0f} px of box",
+                produced=f"{measured['measured_height']:.0f} px of copy",
+                severity=Severity.BLOCKING if overflow > 0.08 else Severity.NOTABLE,
+                message=(
+                    f"'{layer.name}' overruns its box by {overflow * 100:.0f}% at "
+                    f"{layer.size_pt:g} pt ({measured['lines']} line(s))"
+                ),
+                suggestion="Set the size smaller, make the box taller, or cut the copy.",
+            )
+        )
 
     # -------------------------------------------------------------- details
     def _check_canvas(self, report: dict[str, Any], out: FidelityReport) -> None:

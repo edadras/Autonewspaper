@@ -579,9 +579,30 @@ AINS.PPRO = (function () {
 
     api.addAudio = function (spec) {
         var item = api.requireItem(spec.item);
-        var track = api.audioTrack(spec.track === undefined ? 0 : spec.track);
-        track.insertClip(item, api.time(spec.at || 0));
-        return { item: spec.item, track: spec.track === undefined ? 0 : spec.track, at: spec.at || 0 };
+        var index = spec.track === undefined ? 0 : spec.track;
+        var track = api.audioTrack(index);
+        var at = spec.at || 0;
+        track.insertClip(item, api.time(at));
+        var placed = track.clips[Math.max(0, track.clips.numItems - 1)];
+        var trimmed = false;
+        /* A length that was asked for is honoured by trimming the tail: a bed
+         * of music laid under a thirty second cut should end with it rather
+         * than run to the length of the file. */
+        if (spec.duration && placed) {
+            try {
+                placed.end = api.time(api.seconds(placed.start) + spec.duration);
+                trimmed = true;
+            } catch (e) {
+                AINS.log("The audio could not be trimmed: " + e);
+            }
+        }
+        return {
+            item: spec.item,
+            track: index,
+            at: at,
+            duration: spec.duration || null,
+            trimmed: trimmed
+        };
     };
 
     /* -------------------------------------------------------------- export */

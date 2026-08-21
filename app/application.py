@@ -29,6 +29,7 @@ from app.services.content_manager import ContentManager
 from app.services.diagnostics import DiagnosticsService
 from app.services.pipeline import Pipeline
 from app.services.project_manager import ProjectHandle, ProjectManager
+from app.services.studio_service import StudioService
 from app.templates.manager import TemplateManager
 
 log = logging.getLogger(__name__)
@@ -75,6 +76,14 @@ class Application:
         self.diagnostics = DiagnosticsService(
             self.paths, self.settings, ai=self.ai, adobe=self.adobe, templates=self.templates
         )
+        self.studio = StudioService(
+            self.paths,
+            self.settings,
+            self.adobe,
+            self.templates,
+            ai=self.ai,
+            bus=self.bus,
+        )
         self.pipeline = Pipeline(
             self.settings,
             self.projects,
@@ -108,6 +117,7 @@ class Application:
         self.container.register(AssetManager, self.assets)
         self.container.register(ExportService, self.exporter)
         self.container.register(DiagnosticsService, self.diagnostics)
+        self.container.register(StudioService, self.studio)
         self.container.register(Pipeline, self.pipeline)
         self.container.register("app", self)
 

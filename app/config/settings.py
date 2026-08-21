@@ -90,8 +90,10 @@ class AdobeSettings(BaseModel):
 
     indesign_path: str | None = None
     photoshop_path: str | None = None
+    premiere_path: str | None = None
     indesign_version: str | None = None
     photoshop_version: str | None = None
+    premiere_version: str | None = None
     prefer_com: bool = True
     """Use the COM scripting API first (Priority 1)."""
     allow_ui_automation: bool = True

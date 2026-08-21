@@ -1,6 +1,6 @@
 """Adobe service facade.
 
-Owns detection, both controllers and the pre-flight health check of
+Owns detection, all three controllers and the pre-flight health check of
 specification §18. The pipeline asks this object whether it can drive Adobe
 before it starts, so a missing installation is reported up front instead of
 crashing halfway through a run.
@@ -13,9 +13,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from app.adobe.detect import AdobeApp, detect_indesign, detect_photoshop
+from app.adobe.detect import AdobeApp, detect_indesign, detect_photoshop, detect_premiere
 from app.adobe.indesign.controller import InDesignController
 from app.adobe.photoshop.controller import PhotoshopController
+from app.adobe.premiere.controller import PremiereController
 from app.config.settings import SettingsManager
 from app.core.events import EventBus
 from app.utils.files import free_space_bytes, human_size, is_writable
@@ -89,8 +90,10 @@ class AdobeService:
         adobe = settings.settings.adobe
         self.indesign_app: AdobeApp = detect_indesign(adobe.indesign_path)
         self.photoshop_app: AdobeApp = detect_photoshop(adobe.photoshop_path)
+        self.premiere_app: AdobeApp = detect_premiere(adobe.premiere_path)
         self._indesign: InDesignController | None = None
         self._photoshop: PhotoshopController | None = None
+        self._premiere: PremiereController | None = None
 
     # ------------------------------------------------------------ accessors
     @property
@@ -123,14 +126,56 @@ class AdobeService:
             )
         return self._photoshop
 
+    @property
+    def premiere(self) -> PremiereController:
+        """The Premiere controller (created on first use)."""
+        if self._premiere is None:
+            adobe = self.settings.settings.adobe
+            self._premiere = PremiereController(
+                self.work_dir,
+                app=self.premiere_app,
+                bus=self.bus,
+                script_timeout=adobe.script_timeout_seconds,
+                launch_timeout=adobe.launch_timeout_seconds,
+            )
+        return self._premiere
+
+    def controller(self, host: str) -> Any:
+        """The controller for a host named ``indesign``/``photoshop``/``premiere``."""
+        try:
+            return {
+                "indesign": lambda: self.indesign,
+                "photoshop": lambda: self.photoshop,
+                "premiere": lambda: self.premiere,
+            }[host]()
+        except KeyError:
+            raise ValueError(f"Unknown Adobe host '{host}'") from None
+
+    def app(self, host: str) -> AdobeApp:
+        """The detection record for a host."""
+        try:
+            return {
+                "indesign": self.indesign_app,
+                "photoshop": self.photoshop_app,
+                "premiere": self.premiere_app,
+            }[host]
+        except KeyError:
+            raise ValueError(f"Unknown Adobe host '{host}'") from None
+
     def redetect(self) -> dict[str, AdobeApp]:
         """Re-run detection after the operator changed the configured paths."""
         adobe = self.settings.settings.adobe
         self.indesign_app = detect_indesign(adobe.indesign_path)
         self.photoshop_app = detect_photoshop(adobe.photoshop_path)
+        self.premiere_app = detect_premiere(adobe.premiere_path)
         self._indesign = None
         self._photoshop = None
-        return {"indesign": self.indesign_app, "photoshop": self.photoshop_app}
+        self._premiere = None
+        return {
+            "indesign": self.indesign_app,
+            "photoshop": self.photoshop_app,
+            "premiere": self.premiere_app,
+        }
 
     def persist_detection(self) -> None:
         """Write the detected paths and versions back into the settings."""
@@ -140,8 +185,10 @@ class AdobeService:
                 "photoshop_path": str(self.photoshop_app.executable)
                 if self.photoshop_app.executable
                 else None,
+                "premiere_path": str(self.premiere_app.executable) if self.premiere_app.executable else None,
                 "indesign_version": self.indesign_app.version or None,
                 "photoshop_version": self.photoshop_app.version or None,
+                "premiere_version": self.premiere_app.version or None,
             }
         )
 
@@ -165,6 +212,25 @@ class AdobeService:
                 self.photoshop_app.summary(),
             )
         )
+        report.checks.append(
+            HealthCheck(
+                "Premiere Pro installed",
+                self.premiere_app.installed,
+                self.premiere_app.summary(),
+                critical=False,
+            )
+        )
+        if self.premiere_app.installed:
+            report.checks.append(
+                HealthCheck(
+                    "Premiere extension folder",
+                    self.premiere_app.scripts_dir is not None,
+                    str(self.premiere_app.scripts_dir)
+                    if self.premiere_app.scripts_dir
+                    else "the CEP extensions folder could not be located",
+                    critical=False,
+                )
+            )
         report.checks.append(
             HealthCheck(
                 "InDesign version detected",
@@ -242,6 +308,7 @@ class AdobeService:
         return {
             "indesign": self.indesign_app.to_dict(),
             "photoshop": self.photoshop_app.to_dict(),
+            "premiere": self.premiere_app.to_dict(),
             "work_dir": str(self.work_dir),
             "prefer_com": self.settings.settings.adobe.prefer_com,
             "allow_ui_automation": self.settings.settings.adobe.allow_ui_automation,
@@ -249,8 +316,10 @@ class AdobeService:
         }
 
     def shutdown(self) -> None:
-        """Disconnect both controllers."""
-        if self._indesign is not None:
-            self._indesign.disconnect()
-        if self._photoshop is not None:
-            self._photoshop.disconnect()
+        """Disconnect every controller that was actually used."""
+        for controller in (self._indesign, self._photoshop, self._premiere):
+            if controller is not None:
+                try:
+                    controller.disconnect()
+                except Exception as exc:  # noqa: BLE001 - shutdown must not raise
+                    log.warning("Disconnecting %s failed: %s", type(controller).__name__, exc)

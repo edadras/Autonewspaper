@@ -21,6 +21,7 @@ log = logging.getLogger(__name__)
 _LANDSCAPE_WORDS = {"landscape", "horizontal", "wide", "افقی", "yatay", "أفقي"}
 _PORTRAIT_WORDS = {"portrait", "vertical", "tall", "عمودی", "dikey", "عمودي"}
 
+_PAREN_RE = re.compile(r"\(.*?\)")
 _PUNCT_RE = re.compile(r"[\s_\-/]+")
 
 
@@ -46,11 +47,20 @@ class FormatRegistry:
 
     # ---------------------------------------------------------------- data
     def add(self, item: Format) -> Format:
-        """Register a format under its id and its aliases."""
+        """Register a format under its id, its aliases and its name.
+
+        The name is indexed twice: as written, and with any parenthetical
+        qualifier removed. People ask for "vertical video", not "vertical
+        video (9:16)", and the qualifier is there to disambiguate a menu
+        rather than to be typed.
+        """
         self._formats[_key(item.id)] = item
         for alias in item.aliases:
             self._formats.setdefault(_key(alias), item)
         self._formats.setdefault(_key(item.name), item)
+        bare = _PAREN_RE.sub(" ", item.name).strip()
+        if bare and bare != item.name:
+            self._formats.setdefault(_key(bare), item)
         return item
 
     def all(self) -> list[Format]:
@@ -116,13 +126,22 @@ class FormatRegistry:
         )
 
     def _longest_named(self, text: str) -> Format | None:
-        """The longest catalogue name that appears inside *text*."""
-        haystack = f" {_key(text)} "
+        """The catalogue name that best accounts for *text*.
+
+        "Best" is how much of the request the name explains, not how many
+        letters it has: in "instagram reel" the word "reel" says more about
+        the size wanted than the platform does, even though it is shorter.
+        Only when two names explain equally much does the longer one win.
+        """
+        haystack = f"_{_key(text)}_"
         best: Format | None = None
-        best_length = 0
+        best_score = (0, 0)
         for name, item in self._formats.items():
-            if len(name) > best_length and f"_{name}_" in haystack.replace(" ", "_"):
-                best, best_length = item, len(name)
+            if f"_{name}_" not in haystack:
+                continue
+            score = (name.count("_") + 1, len(name))
+            if score > best_score:
+                best, best_score = item, score
         return best
 
     def parse_size(self, text: str, *, dpi: int | None = None) -> Format | None:
