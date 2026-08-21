@@ -437,3 +437,20 @@ def test_opening_our_own_document_clears_the_adopted_flag(library):
     for entry in openers:
         start = source.index(f"api.{entry} = function")
         assert "adopted = false" in source[start : start + 700], f"api.{entry} does not clear it"
+
+
+def test_the_jsx_runtime_is_pure_ascii():
+    """It is concatenated into every generated script.
+
+    A single non-ASCII character anywhere in the library - even in a comment
+    explaining why Persian numerals differ from Arabic ones - makes every
+    script non-ASCII, which is the one thing the encoding contract forbids.
+    """
+    from app.adobe.jsx import SCRIPTS_DIR
+
+    for path in sorted(SCRIPTS_DIR.glob("*.jsx")):
+        source = path.read_text(encoding="utf-8")
+        offenders = [
+            (number, line) for number, line in enumerate(source.splitlines(), 1) if not line.isascii()
+        ]
+        assert not offenders, f"{path.name} line {offenders[0][0]}: {offenders[0][1][:60]}"

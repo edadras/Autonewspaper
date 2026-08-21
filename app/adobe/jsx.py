@@ -174,6 +174,9 @@ def typography_payload(typography: TypographySpec | None, style_id: str) -> dict
         "space_after_pt": typography.space_after_pt,
         "hyphenation": typography.hyphenation,
         "all_caps": typography.all_caps,
+        # Which digit family the paragraph gets, and whether kashida applies,
+        # both depend on the language rather than only on the direction.
+        "language": typography.language,
     }
 
 

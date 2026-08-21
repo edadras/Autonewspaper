@@ -295,8 +295,30 @@ AINS.ID = (function () {
             try {
                 style.paragraphDirection = ParagraphDirectionOptions.RIGHT_TO_LEFT_DIRECTION;
             } catch (e) { AINS.log("paragraphDirection unavailable (non-ME build)"); }
-            try { style.digitsType = DigitsTypeOptions.ARABIC_DIGITS; } catch (e) {}
-            try { style.kashidas = KashidasOptions.KASHIDAS_OFF; } catch (e) {}
+            /* Persian numerals are not Arabic ones - the two scripts draw
+             * four, five and six quite differently - so setting the wrong
+             * family is the kind of thing nobody notices until the paper is
+             * printed. */
+            try {
+                style.digitsType = (spec.language === "ar")
+                    ? DigitsTypeOptions.ARABIC_DIGITS
+                    : DigitsTypeOptions.FARSI_DIGITS;
+            } catch (e) {
+                try { style.digitsType = DigitsTypeOptions.ARABIC_DIGITS; } catch (e2) {}
+            }
+            /* Arabic script is justified by elongating the joins inside
+             * words. InDesign has its own kashida engine and applies it at
+             * composition time, which is better than anything that could be
+             * inserted into the text beforehand - so it is turned on for
+             * justified setting and left off elsewhere, where an elongated
+             * join would just be wrong. */
+            try {
+                var justified = (spec.alignment === "justify" ||
+                                 spec.alignment === "justify_last_right");
+                style.kashidas = justified
+                    ? KashidasOptions.DEFAULT_KASHIDAS
+                    : KashidasOptions.KASHIDAS_OFF;
+            } catch (e) { AINS.log("Kashida setting unavailable (non-ME build)"); }
         } else {
             try {
                 style.paragraphDirection = ParagraphDirectionOptions.LEFT_TO_RIGHT_DIRECTION;

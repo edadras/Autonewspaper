@@ -226,6 +226,12 @@ class TypographySpec(BaseModel):
     tracking: float = 0.0
     alignment: Literal["left", "right", "center", "justify", "justify_last_right"] = "justify"
     direction: Literal["rtl", "ltr"] = "rtl"
+    language: str = "fa"
+    """Which language this frame is set in.
+
+    Direction alone is not enough: Persian and Arabic are both right to left
+    but use different numerals, and only justified setting takes kashida.
+    """
     color: str = "Black"
     space_before_pt: float = 0.0
     space_after_pt: float = 0.0

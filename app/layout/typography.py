@@ -96,6 +96,7 @@ class TypographyEngine:
             tracking=spec.tracking,
             alignment=spec.alignment,
             direction=self.direction,
+            language=self.language,
             color=color or spec.color,
             space_before_pt=spec.space_before_pt,
             space_after_pt=spec.space_after_pt,

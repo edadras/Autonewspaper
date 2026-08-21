@@ -32,7 +32,7 @@ from PIL import features as _pil_features
 
 from app.models.schemas import ElementSpec, ElementType, LayoutPlan, PageLayout
 from app.templates.schema import TemplateSpec
-from app.utils import imaging
+from app.utils import imaging, kashida
 from app.utils.units import mm_to_px
 from app.vision.fonts import load_font
 
@@ -281,10 +281,12 @@ class PreviewRenderer:
         alignment = typography.alignment if typography else "left"
         direction = typography.direction if typography else self.direction
 
-        lines = self._wrap(element.text, font, self.px(column_width), draw)
+        measure_px = self.px(column_width)
+        marked = self._wrap_marked(element.text, font, measure_px, draw)
         lines_per_column = max(1, int(self.px(rect.height) / max(1, leading_px)))
+        justified = alignment in ("justify", "justify_last_right")
 
-        for index, line in enumerate(lines):
+        for index, (line, ends_paragraph) in enumerate(marked):
             column = index // lines_per_column
             if column >= columns:
                 break
@@ -293,6 +295,11 @@ class PreviewRenderer:
             visual_column = (columns - 1 - column) if direction == "rtl" else column
             column_x = rect.x + visual_column * (column_width + gutter)
             y = self.px(rect.y) + row * leading_px
+            if justified and not ends_paragraph and line.strip():
+                # Arabic script is justified by elongating the joins inside
+                # words, not by stretching the spaces between them. Doing it
+                # the Latin way is what makes a Persian column look gappy.
+                line = self._justify_line(line, font, draw, measure_px, direction)
             drawn = shape(line, direction)
             text_width = self._measure(drawn, font, draw, direction)
             if alignment == "center":
@@ -304,6 +311,23 @@ class PreviewRenderer:
             else:
                 x = self.px(column_x)
             draw.text((x, y), drawn, font=font, fill=color, **_text_kwargs(direction))
+
+    def _justify_line(
+        self,
+        line: str,
+        font: Any,
+        draw: ImageDraw.ImageDraw,
+        measure_px: int,
+        direction: str,
+    ) -> str:
+        """Fill a line out to the measure, the way its script is justified."""
+        if direction != "rtl" or not kashida.is_arabic_word(line):
+            return line
+
+        def width(candidate: str) -> float:
+            return self._measure(shape(candidate, direction), font, draw, direction)
+
+        return kashida.justify(line, measure=width, target_width=measure_px)
 
     def _measure(self, text: str, font: Any, draw: ImageDraw.ImageDraw, direction: str | None = None) -> int:
         """Exact advance width of *text*, cached per font and direction."""
@@ -321,6 +345,38 @@ class PreviewRenderer:
         if len(self._width_cache) < WIDTH_CACHE_LIMIT:
             self._width_cache[key] = width
         return width
+
+    def _wrap_marked(
+        self, text: str, font: Any, max_width_px: int, draw: ImageDraw.ImageDraw
+    ) -> list[tuple[str, bool]]:
+        """Wrap, saying of each line whether it ends its paragraph.
+
+        The last line of a paragraph is never justified - filling it out is
+        the single most recognisable sign that a page was set by a machine
+        that did not know better.
+        """
+        lines = self._wrap(text, font, max_width_px, draw)
+        if not lines:
+            return []
+        # Re-walk the source to find where each paragraph finishes.
+        ends: list[bool] = []
+        remaining = [p for p in text.split("\n")]
+        counted = 0
+        for paragraph in remaining:
+            if not paragraph.strip():
+                if counted < len(lines):
+                    ends.append(True)
+                    counted += 1
+                continue
+            wrapped = self._wrap(paragraph, font, max_width_px, draw)
+            for index in range(len(wrapped)):
+                if counted >= len(lines):
+                    break
+                ends.append(index == len(wrapped) - 1)
+                counted += 1
+        while len(ends) < len(lines):
+            ends.append(True)
+        return list(zip(lines, ends, strict=False))
 
     def _wrap(self, text: str, font: Any, max_width_px: int, draw: ImageDraw.ImageDraw) -> list[str]:
         """Greedy word wrap on the *logical* text (before shaping).
