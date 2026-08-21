@@ -11,6 +11,7 @@ never has to care.
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
 from typing import Any, Literal
 
@@ -194,6 +195,7 @@ class PhotoshopController:
         """Perform the same operations with Pillow."""
         notes: list[str] = []
         current = source
+        removed_background = False
         if aspect:
             cropped = target.with_name(f"{target.stem}_crop{target.suffix}")
             current = imaging.smart_crop(current, cropped, aspect, quality=quality)
@@ -225,14 +227,36 @@ class PhotoshopController:
         elif mode == "cmyk":
             notes.append("CMYK conversion requires Photoshop; the file stays in RGB.")
         if remove_background:
-            notes.append("Background removal requires Photoshop; the original background is kept.")
+            # Last, and deliberately so: the crop, the resize and the grade all
+            # run through open_image, which flattens to RGB by design. A matte
+            # made before them would be thrown away by the first one.
+            lifted = imaging.cut_out_subject(current, target.with_name(f"{target.stem}_cut.png"))
+            if lifted["cut_out"]:
+                current = Path(lifted["path"])
+                removed_background = True
+                notes.append(
+                    "The subject was lifted off its background locally; Photoshop's own "
+                    "selection is finer, particularly on hair."
+                )
+            else:
+                notes.append(lifted["reason"])
 
+        if removed_background and target.suffix.lower() not in (".png", ".tif", ".tiff", ".webp"):
+            # A cut-out written as JPEG is a cut-out with its background put back.
+            target = target.with_suffix(".png")
         if Path(current) != target:
-            with imaging.open_image(current) as image:
-                imaging._save(image, target, quality)  # noqa: SLF001 - shared writer
-        for temporary in target.parent.glob(f"{target.stem}_*{target.suffix}"):
-            if temporary != target:
-                temporary.unlink(missing_ok=True)
+            if removed_background:
+                # open_image flattens to RGB by design, which would put the
+                # background straight back; the cut file is already what the
+                # caller asked for, so it is moved rather than re-encoded.
+                shutil.move(str(current), target)
+            else:
+                with imaging.open_image(current) as image:
+                    imaging._save(image, target, quality)  # noqa: SLF001 - shared writer
+        for pattern in (f"{target.stem}_*{target.suffix}", f"{target.stem}_cut.png"):
+            for temporary in target.parent.glob(pattern):
+                if temporary != target:
+                    temporary.unlink(missing_ok=True)
 
         info = imaging.image_info(target)
         if notes:

@@ -495,3 +495,174 @@ def test_a_specialist_only_holds_its_own_applications_tools(studio_context) -> N
     result = design.invoke("start_design", {"name": "d", "format": "A4"})
     assert not result.ok
     assert "is not granted" in result.error
+
+
+# ------------------------------------------------------------- the story ---
+
+
+def _threaded(studio_context, *, heights: tuple[float, ...] = (110.0, 110.0)):
+    """A document with one long story and empty columns to run it into."""
+    registry = build_page_tools(studio_context)
+    registry.invoke("start_document", {"document": "d", "name": "d", "format": "A3", "columns": 6}
+                    if False else {"name": "d", "format": "A3", "columns": 6})
+    body = "متن طولانی برای ستون روزنامه. " * 120
+    x = 16.0
+    for index, height in enumerate(heights):
+        registry.invoke(
+            "add_text_frame",
+            {"document": "d", "page": 1, "name": f"c{index + 1}", "text": body if index == 0 else "",
+             "x_mm": x, "y_mm": 16, "width_mm": 80, "height_mm": height},
+        )
+        x += 84.0
+    return registry
+
+
+def test_threading_actually_flows_the_copy(studio_context) -> None:
+    """A thread that only records a link leaves the second column blank."""
+    registry = _threaded(studio_context)
+
+    result = registry.invoke("thread_frames", {"document": "d", "from_frame": "c1", "to_frame": "c2"})
+
+    assert result.ok, result.error
+    words = {item["frame"]: item["words"] for item in result.data["frames"]}
+    assert words["c1"] > 0 and words["c2"] > 0
+    assert result.data["fits"], "the story fits the two columns together"
+    document = registry.invoke("inspect_document", {"document": "d", "page": 1}).data
+    frames = {frame["name"]: frame for frame in document["pages"][0]["frames"]}
+    assert frames["c1"]["overflow"] == 0.0
+    assert frames["c2"]["text"], "the continuation carries the rest of the story"
+    assert frames["c1"]["text"] != frames["c2"]["text"]
+
+
+def test_a_story_can_run_through_three_columns(studio_context) -> None:
+    registry = _threaded(studio_context, heights=(60.0, 60.0, 60.0))
+    registry.invoke("thread_frames", {"document": "d", "from_frame": "c1", "to_frame": "c2"})
+
+    result = registry.invoke("thread_frames", {"document": "d", "from_frame": "c2", "to_frame": "c3"})
+
+    assert result.data["story"] == ["c1", "c2", "c3"]
+    assert all(item["words"] > 0 for item in result.data["frames"])
+
+
+def test_a_story_may_not_run_in_a_circle(studio_context) -> None:
+    registry = _threaded(studio_context, heights=(60.0, 60.0, 60.0))
+    registry.invoke("thread_frames", {"document": "d", "from_frame": "c1", "to_frame": "c2"})
+    registry.invoke("thread_frames", {"document": "d", "from_frame": "c2", "to_frame": "c3"})
+
+    result = registry.invoke("thread_frames", {"document": "d", "from_frame": "c3", "to_frame": "c1"})
+
+    assert not result.ok
+    assert "circle" in result.error
+
+
+def test_a_frame_that_already_has_its_own_copy_is_not_overwritten(studio_context) -> None:
+    registry = _threaded(studio_context)
+    registry.invoke(
+        "add_text_frame",
+        {"document": "d", "page": 1, "name": "other", "text": "متن دیگر",
+         "x_mm": 184, "y_mm": 16, "width_mm": 80, "height_mm": 40},
+    )
+
+    result = registry.invoke("thread_frames", {"document": "d", "from_frame": "c1", "to_frame": "other"})
+
+    assert not result.ok
+    assert "copy of its own" in result.error
+
+
+def test_removing_a_frame_unhooks_it_from_the_story(studio_context) -> None:
+    registry = _threaded(studio_context)
+    registry.invoke("thread_frames", {"document": "d", "from_frame": "c1", "to_frame": "c2"})
+
+    result = registry.invoke("remove_frame", {"document": "d", "frame": "c2"})
+
+    assert result.ok
+    plan = studio_context._documents["d"].plan  # noqa: SLF001 - the test looks at the model
+    head = plan.pages[0].elements[0]
+    assert head.id == "c1"
+    assert head.meta.get("threads_to") == []
+
+
+# --------------------------------------------------------- the photograph --
+
+
+def _photoshop_context(studio_context, tmp_path):
+    """A context whose Photoshop controller is real but has no Photoshop."""
+    from app.adobe.detect import detect_photoshop
+    from app.adobe.photoshop.controller import PhotoshopController
+
+    studio_context.adobe.photoshop = PhotoshopController(
+        tmp_path / "psd-work", app=detect_photoshop()
+    )
+    return studio_context
+
+
+def test_a_cut_out_that_cannot_be_found_is_reported_rather_than_faked(
+    studio_context, tmp_path
+) -> None:
+    """A busy background has no edge to find; a mangled subject is worse than none."""
+    import random
+
+    busy = tmp_path / "busy.png"
+    picture = Image.new("RGB", (400, 300))
+    pixels = picture.load()
+    random.seed(7)
+    for y in range(300):
+        for x in range(400):
+            pixels[x, y] = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
+    picture.save(busy)
+    context = _photoshop_context(studio_context, tmp_path)
+    registry = build_design_tools(context)
+
+    result = registry.invoke("prepare_photo", {"path": str(busy), "cut_out": True})
+
+    assert result.ok, "the picture is still prepared"
+    assert any("Photoshop" in note for note in result.data["notes"])
+    with Image.open(result.data["path"]) as image:
+        assert image.mode == "RGB", "nothing was cut out, so nothing pretends to be"
+
+
+def test_a_photograph_is_cut_out_and_cropped(studio_context, photograph, tmp_path) -> None:
+    context = _photoshop_context(studio_context, tmp_path)
+    registry = build_design_tools(context)
+
+    result = registry.invoke(
+        "prepare_photo",
+        {"path": str(photograph), "name": "subject", "cut_out": True, "aspect": "4:5"},
+    )
+
+    assert result.ok, result.error
+    produced = Path(result.data["path"])
+    assert produced.exists()
+    with Image.open(produced) as image:
+        assert image.mode in ("RGBA", "LA"), "a cut-out keeps its transparency"
+        assert abs(image.size[0] / image.size[1] - 0.8) < 0.02
+    assert any("locally" in note for note in result.data["notes"]), (
+        "it says the local engine did the work rather than passing it off as Photoshop"
+    )
+
+
+def test_the_prepared_photograph_is_published_for_the_crew(studio_context, photograph, tmp_path) -> None:
+    context = _photoshop_context(studio_context, tmp_path)
+    registry = build_design_tools(context)
+    registry.invoke("prepare_photo", {"path": str(photograph), "name": "hero"})
+
+    registry.invoke("start_design", {"name": "d", "format": "A4"})
+    placed = registry.invoke(
+        "place_photo",
+        {"design": "d", "name": "p", "path": "hero", "x": 0, "y": 0,
+         "width": 100, "height": 60, "units": "percent"},
+    )
+
+    assert placed.ok, "another specialist places it by name"
+    assert "hero" in placed.data["path"]
+
+
+@pytest.mark.parametrize("bad", ["16:0", "sideways", "-3"])
+def test_an_aspect_that_is_not_one_is_refused(studio_context, photograph, tmp_path, bad) -> None:
+    context = _photoshop_context(studio_context, tmp_path)
+    registry = build_design_tools(context)
+
+    result = registry.invoke("prepare_photo", {"path": str(photograph), "aspect": bad})
+
+    assert not result.ok
+    assert "aspect" in result.error

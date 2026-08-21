@@ -59,6 +59,7 @@ def test_the_expected_pages_are_present(window):
         "Layout",
         "Preview",
         "Export",
+        "Studio",
         "AI Settings",
         "Adobe Settings",
         "Logs",

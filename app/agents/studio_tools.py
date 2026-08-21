@@ -553,6 +553,49 @@ def build_design_tools(
 
     registry.register(
         Tool(
+            name="prepare_photo",
+            description=(
+                "Work a photograph before it goes into a design: cut the subject out of "
+                "its background, grade it, crop it to an aspect and convert it for print. "
+                "Returns a new file, published for the rest of the crew to place."
+            ),
+            parameters=[
+                Parameter("path", "string", "The photograph, or a published artefact name"),
+                Parameter("name", "string", "What to call the result", required=False, default=""),
+                Parameter(
+                    "cut_out", "boolean",
+                    "Remove the background, leaving the subject on transparency",
+                    required=False,
+                ),
+                Parameter(
+                    "aspect", "string",
+                    "Crop to this aspect, written as 16:9, 4:5 or a number",
+                    required=False, default="",
+                ),
+                Parameter("width_px", "integer", "Resize to this width", required=False, minimum=16, maximum=30000),
+                Parameter(
+                    "mode", "string", "Colour mode for the result", required=False,
+                    choices=["rgb", "cmyk", "gray"],
+                ),
+                Parameter("brightness", "number", "Brightness, -100 to 100", required=False, minimum=-100, maximum=100),
+                Parameter("contrast", "number", "Contrast, -100 to 100", required=False, minimum=-100, maximum=100),
+                Parameter("saturation", "number", "Saturation, -100 to 100", required=False, minimum=-100, maximum=100),
+                Parameter("sharpen", "number", "Sharpening, 0 to 100", required=False, minimum=0, maximum=100),
+                Parameter(
+                    "focus_y", "number",
+                    "Where the subject sits vertically, 0 at the top and 1 at the foot; a "
+                    "portrait crop keeps the head rather than the middle",
+                    required=False, minimum=0.0, maximum=1.0,
+                ),
+            ],
+            capability="design.build",
+            handler=lambda **kwargs: _prepare_photo(context, author, **kwargs),
+            verifier=verify_exists,
+        )
+    )
+
+    registry.register(
+        Tool(
             name="style_layer",
             description=(
                 "Give a layer its finish: drop shadow, inner shadow, glow, stroke, "
@@ -1023,6 +1066,98 @@ def _furniture_factory(context: StudioContext) -> FurnitureFactory:
                 context.workspace / "furniture", photoshop=photoshop
             )
         return context._furniture  # noqa: SLF001
+
+
+def _prepare_photo(
+    context: StudioContext,
+    author: str,
+    path: str,
+    name: str = "",
+    cut_out: bool | None = None,
+    aspect: str = "",
+    width_px: int | None = None,
+    mode: str | None = None,
+    brightness: float | None = None,
+    contrast: float | None = None,
+    saturation: float | None = None,
+    sharpen: float | None = None,
+    focus_y: float | None = None,
+) -> dict[str, Any]:
+    """Run the photograph through Photoshop, or through the local engine.
+
+    The same call either way: what changes is the quality of the cut-out and
+    the grading, not whether the design gets its picture.
+    """
+    source = _resolve_media(context, path)
+    stem = _slug(name or f"{source.stem}_prepared")
+    directory = context.workspace / "photos"
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / f"{stem}{'.png' if cut_out else source.suffix or '.jpg'}"
+
+    adjust = {
+        key: float(value)
+        for key, value in (
+            ("brightness", brightness),
+            ("contrast", contrast),
+            ("saturation", saturation),
+            ("sharpen", sharpen),
+        )
+        if value is not None
+    }
+    with context.host_lock("photoshop"):
+        result = context.adobe.photoshop.process_image(
+            source,
+            target,
+            aspect=_aspect(aspect) if aspect else None,
+            width_px=int(width_px) if width_px else None,
+            dpi=context.dpi,
+            mode=mode,  # type: ignore[arg-type]
+            remove_background=bool(cut_out),
+            adjust=adjust or None,
+            focus_y=0.42 if focus_y is None else float(focus_y),
+        )
+    produced = Path(result.get("path") or target)
+    context.board.publish(
+        Artefact(
+            name=stem,
+            kind="file",
+            path=str(produced),
+            author=author,
+            detail={"engine": result.get("engine"), "from": str(source), "cut_out": bool(cut_out)},
+        )
+    )
+    return {
+        "name": stem,
+        "path": str(produced),
+        "engine": result.get("engine", "unknown"),
+        "cut_out": bool(cut_out),
+        "width": result.get("width"),
+        "height": result.get("height"),
+        # Whatever the engine could not do, in its own words - a cut-out it
+        # could not find an edge for, a CMYK conversion that needs Photoshop.
+        "notes": result.get("notes") or [],
+    }
+
+
+def _aspect(text: str) -> float:
+    """Read an aspect written the way designers write one."""
+    cleaned = text.strip().replace("x", ":").replace("/", ":")
+    if ":" in cleaned:
+        across, _, down = cleaned.partition(":")
+        try:
+            width, height = float(across), float(down)
+        except ValueError:
+            raise ToolValidationError(f"'{text}' is not an aspect such as 16:9 or 4:5") from None
+        if height <= 0 or width <= 0:
+            raise ToolValidationError(f"'{text}' is not an aspect this studio can use")
+        return width / height
+    try:
+        value = float(cleaned)
+    except ValueError:
+        raise ToolValidationError(f"'{text}' is not an aspect such as 16:9 or 4:5") from None
+    if value <= 0:
+        raise ToolValidationError(f"'{text}' is not an aspect this studio can use")
+    return value
 
 
 def _style_layer(context: StudioContext, design: str, layer: str, **effects: Any) -> dict[str, Any]:
@@ -2358,6 +2493,41 @@ def build_page_tools(
 
     registry.register(
         Tool(
+            name="thread_frames",
+            description=(
+                "Link two text frames so a story runs from one into the next - which is "
+                "how a column continues, and how copy that overruns one frame is carried "
+                "rather than lost."
+            ),
+            parameters=[
+                Parameter("document", "string", "Which document"),
+                Parameter("from_frame", "string", "The frame the story starts in"),
+                Parameter("to_frame", "string", "The frame it continues into"),
+            ],
+            capability="design.write",
+            handler=lambda document, from_frame, to_frame: _thread_frames(
+                context, document, from_frame, to_frame
+            ),
+            verifier=verify_truthy,
+        )
+    )
+
+    registry.register(
+        Tool(
+            name="remove_frame",
+            description="Take a frame off the page.",
+            parameters=[
+                Parameter("document", "string", "Which document"),
+                Parameter("frame", "string", "Frame name"),
+            ],
+            capability="design.write",
+            handler=lambda document, frame: _remove_frame(context, document, frame),
+            verifier=verify_truthy,
+        )
+    )
+
+    registry.register(
+        Tool(
             name="inspect_document",
             description=(
                 "Read the document back: every page, its live area and every frame with "
@@ -2930,6 +3100,195 @@ def _move_frame(
         "height_mm": round(candidate.height, 2),
         "overflow": round(element.estimated_overflow, 3),
     }
+
+
+def _thread_frames(
+    context: StudioContext, document: str, from_frame: str, to_frame: str
+) -> dict[str, Any]:
+    doc = _document(context, document)
+    first_page, first = doc.frame(from_frame)
+    _second_page, second = doc.frame(to_frame)
+    if not (first.is_text and second.is_text):
+        raise ToolValidationError("Only text frames can be threaded")
+    if first.id == second.id:
+        raise ToolValidationError("A frame cannot continue into itself")
+    if second.meta.get("threads_from") not in (None, from_frame):
+        raise ToolValidationError(
+            f"'{to_frame}' already continues '{second.meta['threads_from']}'; "
+            "a frame belongs to one story"
+        )
+    if _would_loop(doc, to_frame, from_frame):
+        raise ToolValidationError(
+            f"Threading '{from_frame}' into '{to_frame}' would make the story run in a circle"
+        )
+    head = _story_head(doc, first)
+    if second.text.strip() and second.meta.get("threads_from") is None:
+        raise ToolValidationError(
+            f"'{to_frame}' already carries copy of its own; empty it first, or thread into "
+            "a frame that is waiting for the story"
+        )
+
+    chain = [name for name in (first.meta.get("threads_to") or []) if name != to_frame]
+    chain.append(to_frame)
+    first.meta["threads_to"] = chain
+    second.meta["threads_from"] = from_frame
+    second.type = head.type
+    second.style_id = head.style_id
+    second.column_span = second.column_span or head.column_span
+
+    flowed = _flow_story(doc, head)
+    _apply_threading(context, doc, head)
+    return {
+        "document": document,
+        "from": from_frame,
+        "to": to_frame,
+        "page": first_page.index,
+        "story": [item["frame"] for item in flowed],
+        "frames": flowed,
+        "overflow": flowed[-1]["overflow"] if flowed else 0.0,
+        "fits": bool(flowed) and flowed[-1]["overflow"] <= 0.001,
+    }
+
+
+def _story_head(doc: Document, element: ElementSpec) -> ElementSpec:
+    """The frame a story starts in, following the chain back."""
+    seen: set[str] = set()
+    current = element
+    while True:
+        previous = current.meta.get("threads_from")
+        if not previous or previous in seen:
+            return current
+        seen.add(str(previous))
+        try:
+            _page, current = doc.frame(str(previous))
+        except ToolValidationError:
+            return current
+
+
+def _story_chain(doc: Document, head: ElementSpec) -> list[ElementSpec]:
+    """Every frame of a story, in reading order."""
+    chain = [head]
+    seen = {head.id}
+    current = head
+    while True:
+        following = [name for name in (current.meta.get("threads_to") or []) if name not in seen]
+        if not following:
+            return chain
+        try:
+            _page, current = doc.frame(str(following[0]))
+        except ToolValidationError:
+            return chain
+        seen.add(current.id)
+        chain.append(current)
+
+
+def _flow_story(doc: Document, head: ElementSpec) -> list[dict[str, Any]]:
+    """Distribute a story's copy across its threaded frames.
+
+    InDesign does this itself when it is driving; offline the preview is the
+    only view there is, so the copy is split here by measuring rather than
+    left sitting entirely in the first frame with the rest blank.
+    """
+    chain = _story_chain(doc, head)
+    story = str(head.meta.get("story") or head.text)
+    head.meta["story"] = story
+    words = story.split()
+    engine = doc.engine.typography
+    placed: list[dict[str, Any]] = []
+    index = 0
+
+    for position, element in enumerate(chain):
+        last = position == len(chain) - 1
+        remaining = words[index:]
+        if not remaining:
+            element.text = ""
+            element.estimated_overflow = 0.0
+            placed.append({"frame": element.id, "words": 0, "overflow": 0.0})
+            continue
+        if last:
+            taken = len(remaining)
+        else:
+            taken = _fitting_words(engine, element, remaining)
+        element.text = " ".join(remaining[:taken])
+        fit = engine.fit(
+            element.text,
+            element.rect,
+            element.type,
+            columns=max(1, element.column_span),
+            allow_truncate=False,
+        )
+        element.typography = fit.typography
+        element.estimated_overflow = fit.overflow
+        index += taken
+        placed.append(
+            {"frame": element.id, "words": taken, "overflow": round(fit.overflow, 3)}
+        )
+    return placed
+
+
+def _fitting_words(engine: Any, element: ElementSpec, words: list[str]) -> int:
+    """How many of *words* this frame holds, found by bisection."""
+    low, high = 0, len(words)
+    while low < high:
+        middle = (low + high + 1) // 2
+        fit = engine.fit(
+            " ".join(words[:middle]),
+            element.rect,
+            element.type,
+            columns=max(1, element.column_span),
+            allow_truncate=False,
+        )
+        if fit.overflow <= 0.001:
+            low = middle
+        else:
+            high = middle - 1
+    # A frame too small for even one word still takes it, or the story stalls.
+    return max(1, low)
+
+
+def _would_loop(doc: Document, start: str, target: str) -> bool:
+    """Whether following the thread from *start* reaches *target*."""
+    seen: set[str] = set()
+    queue = [start]
+    while queue:
+        name = queue.pop()
+        if name == target:
+            return True
+        if name in seen:
+            continue
+        seen.add(name)
+        try:
+            _page, element = doc.frame(name)
+        except ToolValidationError:
+            continue
+        queue.extend(str(item) for item in (element.meta.get("threads_to") or []))
+    return False
+
+
+def _apply_threading(context: StudioContext, doc: Document, head: ElementSpec) -> None:
+    """Tell InDesign about the chain, when InDesign is driving."""
+    if not context.live("indesign"):
+        return
+    chain = _story_chain(doc, head)
+    with context.host_lock("indesign"):
+        for first, second in zip(chain, chain[1:], strict=False):
+            context.adobe.indesign.thread_frames(first.frame_name, second.frame_name)
+
+
+def _remove_frame(context: StudioContext, document: str, frame: str) -> dict[str, Any]:
+    doc = _document(context, document)
+    page, element = doc.frame(frame)
+    if element.locked:
+        raise ToolValidationError(f"'{frame}' is locked")
+    page.elements.remove(element)
+    for other in page.elements:
+        threads = other.meta.get("threads_to")
+        if threads and element.id in threads:
+            other.meta["threads_to"] = [name for name in threads if name != element.id]
+    if context.live("indesign"):
+        with context.host_lock("indesign"):
+            context.adobe.indesign.delete_element(element.frame_name)
+    return {"document": document, "removed": frame, "page": page.index, "frames": len(page.elements)}
 
 
 def _inspect_document(context: StudioContext, document: str, page: int | None) -> dict[str, Any]:

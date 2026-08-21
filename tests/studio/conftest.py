@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from app.agents.studio_tools import StudioContext
 from app.formats.registry import FormatRegistry
@@ -39,7 +39,15 @@ def studio_context(tmp_path: Path, offline_adobe: MagicMock, template) -> Studio
 
 @pytest.fixture
 def photograph(tmp_path: Path) -> Path:
-    """A picture big enough to print."""
+    """A picture big enough to print, with a subject on a backdrop.
+
+    A flat rectangle would pass most of these tests and fail the one that
+    matters: a cut-out has to have something to cut out.
+    """
     target = tmp_path / "photograph.jpg"
-    Image.new("RGB", (2400, 1600), (26, 46, 88)).save(target)
+    picture = Image.new("RGB", (2400, 1600), (233, 231, 227))
+    draw = ImageDraw.Draw(picture)
+    draw.ellipse((900, 300, 1500, 1000), fill=(62, 42, 32))
+    draw.polygon([(820, 1600), (1200, 950), (1580, 1600)], fill=(28, 52, 92))
+    picture.save(target)
     return target

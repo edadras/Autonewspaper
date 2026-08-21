@@ -16,7 +16,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageStat
+from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageOps, ImageStat
 
 from app.models.schemas import ImageAnalysis
 from app.utils.files import checksum
@@ -473,3 +473,122 @@ def image_info(path: Path | str) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         log.debug("image_info failed for %s: %s", path, exc)
         return {"width": 0, "height": 0, "mode": "", "format": "", "dpi": 72.0}
+
+
+#: How far a pixel may differ from the sampled background and still be taken
+#: for background. Generous enough for a studio backdrop's gradient, tight
+#: enough not to eat a dark jacket.
+_MATTE_TOLERANCE = 34
+
+#: A cut-out that takes almost none of the picture, or almost all of it, is a
+#: failed one. Saying so is better than handing back a mangled subject.
+_MATTE_MIN_SHARE = 0.04
+_MATTE_MAX_SHARE = 0.92
+
+#: How much of the border ring has to be one colour before there is a
+#: background worth calling one. A subject at the edge of the frame takes a
+#: corner or two; a photograph of a street takes all of them.
+_MATTE_BORDER_SHARE = 0.55
+
+
+def _border_pixels(image: Image.Image, step: int = 4) -> list[tuple[int, ...]]:
+    """The pixels around the edge of a picture, sampled."""
+    width, height = image.size
+    pixels = image.load()
+    ring: list[tuple[int, ...]] = []
+    for x in range(0, width, step):
+        ring.append(pixels[x, 0])
+        ring.append(pixels[x, height - 1])
+    for y in range(0, height, step):
+        ring.append(pixels[0, y])
+        ring.append(pixels[width - 1, y])
+    return ring
+
+
+def cut_out_subject(
+    source: Path | str,
+    target: Path | str,
+    *,
+    tolerance: int = _MATTE_TOLERANCE,
+    feather: float = 1.6,
+) -> dict[str, Any]:
+    """Lift the subject off a plain background, locally.
+
+    A flood fill inward from the edges, so only background actually connected
+    to the border is removed and a light shirt in the middle of the frame is
+    not. The edge is feathered so the cut does not look like scissors.
+
+    This is not Photoshop's selection and does not pretend to be: on a busy
+    background it will not find an edge, and rather than return a mangled
+    subject it reports that it could not and leaves the picture alone. What it
+    does handle is the common case - a portrait against a wall or a backdrop.
+    """
+    source, target = Path(source), Path(target)
+    with Image.open(source) as opened:
+        picture = opened.convert("RGBA")
+    width, height = picture.size
+    flat = picture.convert("RGB")
+
+    # The background colour is the median of the border ring, not of the four
+    # corners: a subject standing at the edge of the frame owns one corner and
+    # that is not a reason to give up on the picture.
+    ring = _border_pixels(flat)
+    reference = tuple(sorted(band)[len(band) // 2] for band in zip(*ring, strict=True))
+    agreeing = sum(
+        1
+        for pixel in ring
+        if max(abs(pixel[band] - reference[band]) for band in range(3)) <= tolerance
+    )
+    share = agreeing / max(1, len(ring))
+    if share < _MATTE_BORDER_SHARE:
+        return {
+            "cut_out": False,
+            "path": str(source),
+            "reason": (
+                f"Only {share * 100:.0f}% of this picture's edge is one colour, so there is no "
+                "background to lift the subject off. Photoshop's own selection is needed."
+            ),
+        }
+
+    # Distance from the background colour, as a mask: white is background.
+    difference = ImageChops.difference(flat, Image.new("RGB", picture.size, reference))
+    grey = difference.convert("L")
+    near = grey.point(lambda value: 255 if value <= tolerance else 0)
+
+    # Only background joined to the border counts, so a pale patch inside the
+    # subject stays part of it.
+    # The border ring starts as background so the fill can begin outside the
+    # picture and run inward through whatever is connected to the edge.
+    reachable = Image.new("L", (width + 2, height + 2), 255)
+    reachable.paste(near, (1, 1))
+    ImageDraw.floodfill(reachable, (0, 0), 128, thresh=0)
+    matte = reachable.crop((1, 1, width + 1, height + 1)).point(
+        lambda value: 0 if value == 128 else 255
+    )
+
+    histogram = matte.histogram()
+    removed = histogram[0] / max(1, width * height)
+    if removed < _MATTE_MIN_SHARE or removed > _MATTE_MAX_SHARE:
+        return {
+            "cut_out": False,
+            "path": str(source),
+            "reason": (
+                f"A local cut-out would have removed {removed * 100:.0f}% of this picture, "
+                "which is not a subject on a background. Photoshop's own selection is needed."
+            ),
+        }
+
+    if feather > 0:
+        matte = matte.filter(ImageFilter.GaussianBlur(feather))
+    picture.putalpha(matte)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.suffix.lower() not in (".png", ".tif", ".tiff", ".webp"):
+        target = target.with_suffix(".png")
+    picture.save(target)
+    picture.close()
+    return {
+        "cut_out": True,
+        "path": str(target),
+        "removed_share": round(removed, 3),
+        "engine": "pillow",
+    }

@@ -47,6 +47,7 @@ from app.ui.pages.logs import LogsPage
 from app.ui.pages.preview import PreviewPage
 from app.ui.pages.projects import NewProjectPage, ProjectsPage
 from app.ui.pages.settings_pages import AdobeSettingsPage, AISettingsPage, DiagnosticsPage
+from app.ui.pages.studio import StudioPage
 from app.ui.pages.templates import TemplatesPage
 from app.ui.widgets.common import confirm, show_error
 
@@ -155,6 +156,7 @@ class MainWindow(QMainWindow):
             LayoutPage,
             PreviewPage,
             ExportPage,
+            StudioPage,
             AISettingsPage,
             AdobeSettingsPage,
             DiagnosticsPage,
