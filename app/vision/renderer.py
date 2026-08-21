@@ -208,6 +208,31 @@ class PreviewRenderer:
             fill=self.color(element.fill_color, INK),
         )
 
+    @staticmethod
+    def _fit_picture(picture: Image.Image, width: int, height: int, mode: str) -> Image.Image:
+        """Size a picture to its frame the way the element asked for.
+
+        A photograph is cropped to fill, which is what a picture box does. A
+        piece of furniture is drawn to the size of its frame already, so
+        cropping it would shave the edge effect it was made larger to keep.
+        """
+        from PIL import ImageOps
+
+        if mode == "none":
+            return picture.resize((width, height), Image.Resampling.LANCZOS)
+        if mode in ("fit", "proportional"):
+            contained = picture.copy()
+            contained.thumbnail((width, height), Image.Resampling.LANCZOS)
+            out = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            out.paste(
+                contained,
+                ((width - contained.width) // 2, (height - contained.height) // 2),
+                contained,
+            )
+            contained.close()
+            return out
+        return ImageOps.fit(picture, (width, height), Image.Resampling.LANCZOS, centering=(0.5, 0.42))
+
     def _draw_image(
         self,
         canvas: Image.Image,
@@ -223,12 +248,16 @@ class PreviewRenderer:
             try:
                 from PIL import ImageOps
 
-                with Image.open(source) as picture:
-                    picture = ImageOps.exif_transpose(picture).convert("RGB")
-                    fitted = ImageOps.fit(
-                        picture, (width, height), Image.Resampling.LANCZOS, centering=(0.5, 0.42)
-                    )
-                canvas.paste(fitted, (box[0], box[1]))
+                with Image.open(source) as opened:
+                    # RGBA, not RGB: a piece of furniture drawn with
+                    # transparency would otherwise arrive with a black
+                    # rectangle behind it.
+                    picture = ImageOps.exif_transpose(opened).convert("RGBA")
+                    fitted = self._fit_picture(picture, width, height, element.fit_mode)
+                    picture.close()
+                # Pasted through its own alpha, so what is transparent stays so.
+                canvas.paste(fitted, (box[0], box[1]), fitted)
+                fitted.close()
                 return
             except Exception as exc:  # noqa: BLE001
                 warnings.append(f"{element.frame_name}: cannot draw image ({exc})")

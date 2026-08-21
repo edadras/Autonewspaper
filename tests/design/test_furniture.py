@@ -289,3 +289,123 @@ def test_a_transparent_design_refuses_to_be_written_as_jpeg(tmp_path):
     plan = FurnitureDesigner().plan(_spec(Furniture.RULED_BOX))
     with pytest.raises(ValueError, match="cannot be written as JPEG"):
         DesignRenderer(plan).render_to(tmp_path / "box.jpg")
+
+
+# ------------------------------------------------- furniture on a real page
+def test_furniture_is_placed_where_the_page_calls_for_it(template, article_blocks, tmp_path):
+    from app.design.furnisher import FurnishingStyle, PageFurnisher
+    from app.layout.engine import LayoutEngine
+
+    engine = LayoutEngine(template, language="fa")
+    page = engine.plan_edition(1, {1: article_blocks}, page_count=1, sections={1: "تلویزیون"}).pages[0]
+    before = len(page.elements)
+
+    factory = FurnitureFactory(tmp_path)
+    result = PageFurnisher(factory, style=FurnishingStyle(), dpi=150).furnish(page, direction="rtl")
+
+    assert result.added, "a page with a section and a folio has furniture"
+    assert len(page.elements) == before + len(result.added)
+    kinds = {item.kind for item in result.added}
+    assert Furniture.SECTION_TAB in kinds
+    assert Furniture.PAGE_BADGE in kinds
+    assert Furniture.FOOTER_RULE in kinds
+
+
+def test_every_piece_sits_behind_the_type_and_is_locked(template, article_blocks, tmp_path):
+    from app.design.furnisher import BACKGROUND_Z, PageFurnisher
+    from app.layout.engine import LayoutEngine
+
+    engine = LayoutEngine(template, language="fa")
+    page = engine.plan_edition(1, {1: article_blocks}, page_count=1, sections={1: "خبر"}).pages[0]
+    PageFurnisher(FurnitureFactory(tmp_path), dpi=150).furnish(page)
+
+    pieces = [e for e in page.elements if e.meta.get("furniture")]
+    assert pieces
+    for piece in pieces:
+        assert piece.z_index <= BACKGROUND_Z, f"{piece.id} would cover the type"
+        assert piece.locked, "the operator did not place it, so it is not theirs to drag"
+        assert piece.meta["decorative"] is True, "QA must not measure it as a photograph"
+        assert piece.fit_mode == "none", "it is drawn to size; cropping shaves the edge effect"
+
+
+def test_each_piece_records_why_it_is_there(template, article_blocks, tmp_path):
+    """Furniture that decorates nothing is what makes a page look designed-at."""
+    from app.design.furnisher import PageFurnisher
+    from app.layout.engine import LayoutEngine
+
+    engine = LayoutEngine(template, language="fa")
+    page = engine.plan_edition(1, {1: article_blocks}, page_count=1, sections={1: "خبر"}).pages[0]
+    result = PageFurnisher(FurnitureFactory(tmp_path), dpi=150).furnish(page)
+
+    for item in result.added:
+        assert item.reason, f"{item.kind.value} was placed for no stated reason"
+
+
+def test_turning_a_piece_off_leaves_it_off(template, article_blocks, tmp_path):
+    from app.design.furnisher import FurnishingStyle, PageFurnisher
+    from app.layout.engine import LayoutEngine
+
+    engine = LayoutEngine(template, language="fa")
+    page = engine.plan_edition(1, {1: article_blocks}, page_count=1, sections={1: "خبر"}).pages[0]
+    style = FurnishingStyle(section_tab=False, edge_arcs=False, folio_badge=False)
+    result = PageFurnisher(FurnitureFactory(tmp_path), style=style, dpi=150).furnish(page)
+
+    kinds = {item.kind for item in result.added}
+    assert Furniture.SECTION_TAB not in kinds
+    assert Furniture.EDGE_ARC not in kinds
+    assert Furniture.PAGE_BADGE not in kinds
+
+
+def test_a_transparent_piece_does_not_paint_black_on_the_page(template, tmp_path):
+    """The page renderer threw the alpha away and every piece had a black box."""
+    from app.layout.engine import LayoutEngine
+    from app.models.schemas import ElementSpec, ElementType, Rect
+    from app.vision.renderer import PreviewRenderer
+
+    engine = LayoutEngine(template, language="fa")
+    page = engine.plan_edition(1, {}, page_count=1).pages[0]
+    piece = FurnitureFactory(tmp_path).make(_spec(Furniture.PAGE_BADGE, width_mm=20, height_mm=20, dpi=150))
+    page.elements.append(
+        ElementSpec(
+            id="badge",
+            type=ElementType.IMAGE,
+            rect=Rect(x=40, y=40, width=30, height=30),
+            z_index=-50,
+            image_path=str(piece),
+            fit_mode="none",
+        )
+    )
+
+    rendered = PreviewRenderer(template, dpi=70).render_page(page, tmp_path / "page.png")
+    with Image.open(rendered.path) as image:
+        rgb = image.convert("RGB")
+        # The corner of the badge's frame is transparent, so the paper shows.
+        corner = rgb.getpixel((int(41 / page.width_mm * rgb.width), int(41 / page.height_mm * rgb.height)))
+    assert min(corner) > 180, f"the paper should show through, not {corner}"
+
+
+def test_a_photograph_is_still_cropped_to_fill_its_box(template, tmp_path):
+    """Honouring the fit mode must not stop a picture box behaving like one."""
+    from app.layout.engine import LayoutEngine
+    from app.models.schemas import ElementSpec, ElementType, Rect
+    from app.vision.renderer import PreviewRenderer
+
+    wide = tmp_path / "wide.png"
+    Image.new("RGB", (900, 200), "#cc2200").save(wide)
+    engine = LayoutEngine(template, language="fa")
+    page = engine.plan_edition(1, {}, page_count=1).pages[0]
+    page.elements.append(
+        ElementSpec(
+            id="photo",
+            type=ElementType.IMAGE,
+            rect=Rect(x=40, y=60, width=60, height=60),
+            image_path=str(wide),
+            fit_mode="fill",
+        )
+    )
+
+    rendered = PreviewRenderer(template, dpi=70).render_page(page, tmp_path / "page.png")
+    with Image.open(rendered.path) as image:
+        rgb = image.convert("RGB")
+        middle = rgb.getpixel((int(70 / page.width_mm * rgb.width), int(90 / page.height_mm * rgb.height)))
+    assert middle[0] > 150 and middle[1] < 90, "the square box should be filled by the photograph"
