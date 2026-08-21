@@ -63,6 +63,23 @@ class StudioService:
         studio = Studio(context, ai=self.ai, bus=self.bus)
         return studio.run(brief, token=token, ask=ask)
 
+    def direct(
+        self,
+        brief: Brief,
+        *,
+        count: int = 3,
+        token: CancelToken | None = None,
+        workspace: Path | None = None,
+    ) -> StudioRun:
+        """Put several concepts on the table, each of them built.
+
+        The concepts are made rather than described, and pinned up side by
+        side: choosing between three paragraphs is not the exercise the
+        proposal is for.
+        """
+        context = self.context(workspace=workspace, language=brief.language)
+        return Studio(context, ai=self.ai, bus=self.bus).direct(brief, count=count, token=token)
+
     def context(self, *, workspace: Path | None = None, language: str = "fa") -> StudioContext:
         """A studio context wired to this installation."""
         target = Path(workspace) if workspace else self.settings.output_dir() / "studio"

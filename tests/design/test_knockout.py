@@ -224,3 +224,54 @@ def test_a_knockout_naming_a_layer_that_is_not_there_falls_back(striped: Path) -
     row = [image.getpixel((x, middle)) for x in range(60, 740)]
     image.close()
     assert any(pixel == STRIPE for pixel in row), "the headline disappeared entirely"
+
+
+def test_the_lines_break_the_same_way_at_any_scale(tmp_path: Path) -> None:
+    """A preview has to show the design that is actually going to be made.
+
+    Font metrics do not scale linearly - hinting rounds every advance to a
+    whole pixel - so a headline that sets on two lines at print resolution can
+    set on three in a thumbnail. Deciding the wrap once, at full size, is what
+    keeps a contact sheet of previews a set of concepts somebody can choose
+    between.
+    """
+    plan = DesignPlan(
+        name="wrap",
+        canvas=Canvas(width_px=2480, height_px=3508, dpi=300, background="#ffffff"),
+    )
+    plan.add(
+        Layer(
+            name="headline", kind=LayerKind.TEXT,
+            box=Box(x=200, y=1200, width=2080, height=1100),
+            text="CITY FILM FESTIVAL", size_pt=143, color="#111111", z=0,
+        )
+    )
+    layer = plan.layer("headline")
+
+    at_full = DesignRenderer(plan).lines_of(layer)
+    assert at_full, "nothing was set at all"
+    for scale in (0.5, 0.25, 0.1, 0.06):
+        assert DesignRenderer(plan, scale=scale).lines_of(layer) == at_full, (
+            f"the preview at {scale:.0%} breaks the lines differently"
+        )
+
+
+def test_auto_fitted_type_leaves_room_beneath_it(tmp_path: Path) -> None:
+    """Type filling its box exactly touches whatever is set under it."""
+    from app.design.renderer import measure_text
+
+    plan = DesignPlan(
+        name="fit", canvas=Canvas(width_px=1200, height_px=1600, dpi=150, background="#ffffff")
+    )
+    layer = Layer(
+        name="head", kind=LayerKind.TEXT, box=Box(x=60, y=100, width=1080, height=400),
+        text="A HEADLINE THAT RUNS ON A BIT", color="#111111", z=0,
+    )
+    plan.add(layer)
+
+    from app.design.renderer import fit_to_box
+
+    fit_to_box(plan, layer)
+
+    measured = measure_text(plan, layer)
+    assert measured["measured_height"] <= layer.box.height * 0.95

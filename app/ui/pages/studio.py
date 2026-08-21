@@ -35,7 +35,7 @@ from app.agents.studio import Brief, Question, StudioRun
 from app.core.jobs import CancelToken
 from app.ui.pages.base import Page
 from app.ui.pages.preview import _open_path
-from app.ui.widgets.common import Card, Toolbar
+from app.ui.widgets.common import Card, ImageCanvas, Toolbar
 
 log = logging.getLogger(__name__)
 
@@ -179,6 +179,12 @@ class StudioPage(Page):
         self.run_button = toolbar.add(QPushButton("Make it"))
         self.run_button.setObjectName("Primary")
         self.run_button.clicked.connect(self._run)
+        self.direct_button = toolbar.add(QPushButton("Show me concepts"))
+        self.direct_button.setToolTip(
+            "Build several genuinely different concepts and pin them up side by side, "
+            "instead of going straight to one answer."
+        )
+        self.direct_button.clicked.connect(self._direct)
         self.cancel_button = toolbar.add(QPushButton("Stop"))
         self.cancel_button.setEnabled(False)
         self.cancel_button.clicked.connect(self._cancel)
@@ -211,6 +217,19 @@ class StudioPage(Page):
         self.concept_label.setWordWrap(True)
         concept_card.add(self.concept_label)
         layout.addWidget(concept_card)
+
+        concepts_card = Card("The concepts")
+        self.concepts_view = ImageCanvas()
+        self.concepts_view.setMinimumHeight(260)
+        self.concepts_view.clear("Nothing has been directed yet.")
+        concepts_card.add(self.concepts_view)
+        self.concepts_note = QLabel("")
+        self.concepts_note.setObjectName("Subtitle")
+        self.concepts_note.setWordWrap(True)
+        concepts_card.add(self.concepts_note)
+        self.concepts_card = concepts_card
+        concepts_card.setVisible(False)
+        layout.addWidget(concepts_card, 2)
 
         crew_card = Card("The crew")
         self.crew_list = QListWidget()
@@ -316,6 +335,33 @@ class StudioPage(Page):
             status=self.status,
         )
 
+    def _direct(self) -> None:
+        """Ask for several concepts rather than one answer."""
+        brief = self._brief()
+        if not brief.request and not brief.content:
+            self.status.setText("Say what you want made, or paste the copy to make it from.")
+            return
+        if not brief.format:
+            self.status.setText(
+                "Give a size first: the concepts are built, and a design has to be built at "
+                "some size."
+            )
+            return
+        self.token = CancelToken()
+        self.cancel_button.setEnabled(True)
+        self.crew_list.clear()
+        self.files_list.clear()
+        token = self.token
+        service = self.app.studio
+        self.run_background(
+            "studio",
+            "The director is working up concepts",
+            lambda: service.direct(brief, count=3, token=token),
+            on_success=self._show,
+            busy_widgets=[self.run_button, self.direct_button],
+            status=self.status,
+        )
+
     def _cancel(self) -> None:
         if self.token is not None:
             self.token.cancel()
@@ -339,6 +385,7 @@ class StudioPage(Page):
         self.last_run = run
         self.cancel_button.setEnabled(False)
         self._show_questions(run.questions)
+        self._show_concepts(run)
 
         concept = run.concept
         parts = [f"<b>{concept.name or 'Untitled'}</b>"]
@@ -379,6 +426,25 @@ class StudioPage(Page):
             )
         else:
             self.status.setText(f"Stopped: {run.stop_reason}")
+
+    def _show_concepts(self, run: StudioRun) -> None:
+        """Pin the concepts up, so the choice is made by looking."""
+        if not run.directions:
+            self.concepts_card.setVisible(False)
+            return
+        self.concepts_card.setVisible(True)
+        if run.sheet and Path(run.sheet).exists():
+            self.concepts_view.load(run.sheet)
+        else:
+            self.concepts_view.clear("The concepts could not be pinned up.")
+        recommended = next((item for item in run.directions if item.recommended), None)
+        lines = [
+            f"{len(run.directions)} concepts. "
+            + ("I would run " + f"<b>{recommended.name}</b>." if recommended else "")
+        ]
+        for item in run.directions:
+            lines.append(f"<b>{item.name}</b> — {item.rationale or item.idea}")
+        self.concepts_note.setText("<br>".join(lines))
 
     def _show_questions(self, questions: list[Question]) -> None:
         """Draw the interactive cards, or hide them when there are none."""

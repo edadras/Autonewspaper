@@ -55,6 +55,9 @@ class DesignRenderer:
     def __init__(self, plan: DesignPlan, *, scale: float = 1.0) -> None:
         self.plan = plan
         self.scale = max(0.05, scale)
+        #: Where each text layer's lines break, worked out once at full size
+        #: and reused whatever this renderer is drawing at.
+        self._wraps: dict[str, list[str]] = {}
 
     # -------------------------------------------------------------- public
     def render(self, target: Path | str | None = None) -> Image.Image:
@@ -247,8 +250,9 @@ class DesignRenderer:
         resized.close()
         return cropped
 
-    def _font(self, layer: Layer) -> Any:
-        size_px = max(1, int(round(_pt_to_px(layer.size_pt or 12, self.plan.canvas.dpi) * self.scale)))
+    def _font(self, layer: Layer, *, scale: float | None = None) -> Any:
+        factor = self.scale if scale is None else scale
+        size_px = max(1, int(round(_pt_to_px(layer.size_pt or 12, self.plan.canvas.dpi) * factor)))
         return load_font(
             layer.font or self.plan.fonts.get("body", ""),
             size_px,
@@ -256,6 +260,28 @@ class DesignRenderer:
             script="arabic" if layer.direction == "rtl" else "latin",
             fallbacks=tuple(layer.fallback_fonts),
         )
+
+    def lines_of(self, layer: Layer) -> list[str]:
+        """How this layer's copy breaks, decided once at full size.
+
+        Always at full size, whatever the renderer is drawing at. Font metrics
+        do not scale linearly - hinting rounds every advance to a whole pixel -
+        so a headline that sets on two lines at three hundred dpi can set on
+        three in a preview a fifth of that. The preview then shows a design
+        nobody is going to get, and a contact sheet of previews is a set of
+        concepts nobody is choosing between.
+        """
+        cached = self._wraps.get(layer.name)
+        if cached is not None:
+            return cached
+        scratch = Image.new("RGBA", (8, 8))
+        draw = ImageDraw.Draw(scratch)
+        font = self._font(layer, scale=1.0)
+        text = layer.text.upper() if layer.all_caps else layer.text
+        lines = self._wrap(text, font, max(1, int(round(layer.box.width))), draw, layer.direction)
+        scratch.close()
+        self._wraps[layer.name] = lines
+        return lines
 
     def _draw_text(self, layer: Layer, size: tuple[int, int]) -> Image.Image:
         image = Image.new("RGBA", size, (0, 0, 0, 0))
@@ -273,7 +299,7 @@ class DesignRenderer:
         colour = _rgba(layer.color, 100)
         kwargs = _text_kwargs(layer.direction)
         y = top
-        for line in self._wrap(text, font, max_width, draw, layer.direction):
+        for line in self.lines_of(layer):
             rendered = shape(line, layer.direction)
             width = self._width(rendered, font, draw, layer.direction)
             if layer.alignment == "center":
@@ -319,9 +345,7 @@ class DesignRenderer:
         scratch = Image.new("RGBA", (8, 8))
         draw = ImageDraw.Draw(scratch)
         font = self._font(layer)
-        text = layer.text.upper() if layer.all_caps else layer.text
-        max_width = max(1, int(round(layer.box.width * self.scale)))
-        lines = self._wrap(text, font, max_width, draw, layer.direction)
+        lines = self.lines_of(layer)
         leading = max(
             1,
             int(round(_pt_to_px(layer.leading_pt or layer.size_pt * 1.2, self.plan.canvas.dpi) * self.scale)),
@@ -529,6 +553,12 @@ def measure_text(plan: DesignPlan, layer: Layer) -> dict[str, Any]:
     return DesignRenderer(plan)._measure_text(layer)  # noqa: SLF001 - the same package
 
 
+#: How much of its box auto-fitted type is allowed to fill. Not all of it: a
+#: headline that ends exactly on the edge of its box touches whatever is set
+#: beneath it, and descenders make that a collision rather than a near miss.
+FILL_SHARE = 0.93
+
+
 def fit_to_box(
     plan: DesignPlan,
     layer: Layer,
@@ -536,6 +566,7 @@ def fit_to_box(
     min_pt: float = 6.0,
     max_pt: float = 800.0,
     start_pt: float | None = None,
+    fill: float = FILL_SHARE,
 ) -> float:
     """The largest type size at which this layer's copy fits its box.
 
@@ -552,12 +583,16 @@ def fit_to_box(
     ratio = (layer.leading_pt / layer.size_pt) if layer.size_pt and layer.leading_pt else 1.2
     ceiling = min(max_pt, layer.box.height / max(1, plan.canvas.dpi) * 72.0)
     low, high = float(min_pt), max(float(min_pt), float(start_pt or ceiling))
+    room = max(0.05, min(1.0, fill)) * layer.box.height
 
     def fits(size: float) -> bool:
         layer.size_pt = size
         layer.leading_pt = round(size * ratio, 2)
         measured = measure_text(plan, layer)
-        return measured["overflow"] <= 0.0 and measured["measured_width"] <= layer.box.width + 1.0
+        return (
+            measured["measured_height"] <= room
+            and measured["measured_width"] <= layer.box.width + 1.0
+        )
 
     if fits(high):
         return layer.size_pt

@@ -36,6 +36,7 @@ from typing import Any
 
 from app.agents import recipes
 from app.agents.autonomous import AgentRun, AutonomousAgent
+from app.agents.direction import CreativeDirection, Direction, contact_sheet, spread
 from app.agents.studio_tools import (
     StudioContext,
     build_design_tools,
@@ -235,6 +236,10 @@ class StudioRun:
 
     brief: Brief
     concept: Concept = field(default_factory=Concept)
+    directions: list[Direction] = field(default_factory=list)
+    """The concepts that were put on the table, when more than one was."""
+    sheet: str = ""
+    """Where they were pinned up side by side."""
     results: list[SpecialistResult] = field(default_factory=list)
     artefacts: list[dict[str, Any]] = field(default_factory=list)
     notes: list[dict[str, str]] = field(default_factory=list)
@@ -261,6 +266,8 @@ class StudioRun:
             "stop_reason": self.stop_reason,
             "duration": round(self.duration, 2),
             "questions": [item.to_dict() for item in self.questions],
+            "directions": [item.to_dict() for item in self.directions],
+            "sheet": self.sheet,
             "results": [item.to_dict() for item in self.results],
             "artefacts": self.artefacts,
             "notes": self.notes,
@@ -997,6 +1004,97 @@ class Studio:
             found = self._specialists[host] = Specialist(host, self.context, ai=self.ai, bus=self.bus)
         return found
 
+    # ------------------------------------------------------ direction
+    def direct(
+        self,
+        brief: Brief,
+        *,
+        count: int = 3,
+        token: CancelToken | None = None,
+        style: StyleBrief | None = None,
+    ) -> StudioRun:
+        """Put several concepts on the table, built rather than described.
+
+        Every concept is actually made - a director presents work, not a
+        paragraph about work - and they are pinned up side by side so the
+        comparison the whole exercise is for can be made by looking.
+
+        The concepts run at the same time where the host allows it, which for
+        Photoshop means one after another; they are all in Photoshop, so this
+        is where the crew's parallelism runs out and honesty about that is
+        better than pretending otherwise.
+        """
+        started = time.monotonic()
+        self.context.language = brief.language or self.context.language
+        if style is None and brief.references and self.context.analyst is not None:
+            style = self._read_references(brief)
+
+        director = CreativeDirection(self.ai, formats=self.context.formats, dpi=self.context.dpi)
+        directions = director.propose(brief, style=style, count=count)
+        concept = Concept(
+            name=brief.title or brief.request[:80],
+            rationale=(
+                f"{len(directions)} concepts, the closest pair {spread(directions):.0%} apart: "
+                + "; ".join(f"{item.name} ({item.approach.value})" for item in directions)
+            ),
+            source="direction",
+            assignments=[
+                Assignment(
+                    id=f"concept_{index + 1}",
+                    host="photoshop",
+                    goal=f"Build the '{item.name}' concept",
+                    detail=item.rationale,
+                    recipe=item.recipe,
+                )
+                for index, item in enumerate(directions)
+                if item.recipe is not None
+            ],
+        )
+        out = StudioRun(brief=brief, concept=concept, directions=directions)
+        self._emit(EventType.PIPELINE_STARTED, concept=concept.name, assignments=len(concept.assignments))
+        try:
+            out.results = self._carry_out(concept.assignments, token)
+        finally:
+            board = self.context.board
+            for direction in directions:
+                artefact = board.artefact(f"{_design_of(direction)}:preview") or board.artefact(
+                    _design_of(direction)
+                )
+                if artefact and artefact.path:
+                    direction.preview = artefact.path
+            out.artefacts = [item.to_dict() for item in board.artefacts()]
+            out.notes = board.notes()
+            out.duration = time.monotonic() - started
+
+        try:
+            out.sheet = str(
+                contact_sheet(
+                    directions,
+                    self.context.workspace / f"{_slug(brief.title or 'concepts')}_concepts.png",
+                    title=brief.title or brief.request[:60],
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - the concepts still exist
+            log.warning("The concepts could not be pinned up: %s", exc)
+
+        out.questions = [_which_concept(directions)] if len(directions) > 1 else []
+        out.stop_reason = (
+            "concepts ready" if any(result.ok for result in out.results) else "no concept was built"
+        )
+        self._emit(
+            EventType.APPROVAL_REQUIRED,
+            questions=[question.to_dict() for question in out.questions],
+            concept=concept.name,
+            sheet=out.sheet,
+        )
+        log.info(
+            "Directed '%s': %d concept(s) built in %.1fs",
+            concept.name,
+            sum(1 for result in out.results if result.ok),
+            out.duration,
+        )
+        return out
+
     # ------------------------------------------------------------- run
     def run(
         self,
@@ -1173,6 +1271,43 @@ class Studio:
     def _emit(self, event: EventType, **payload: Any) -> None:
         if self.bus is not None:
             self.bus.publish(event, **payload)
+
+
+def _design_of(direction: Direction) -> str:
+    """The name the concept's recipe builds under."""
+    if direction.recipe is None:
+        return ""
+    for _tool, arguments in direction.recipe.calls:
+        if "design" in arguments:
+            return str(arguments["design"])
+        if "name" in arguments:
+            return str(arguments["name"])
+    return ""
+
+
+def _which_concept(directions: list[Direction]) -> Question:
+    """The card that asks which concept to take forward.
+
+    Asked after they are built rather than before, because a concept nobody
+    has seen is a sentence and choosing between sentences is not the same
+    exercise as choosing between designs.
+    """
+    return Question(
+        id="concept",
+        question="Which of these should be taken forward?",
+        why=(
+            "They are all built and pinned up. Pick one and the crew develops it; "
+            "the others stay on file."
+        ),
+        options=[
+            Option(
+                label=item.name,
+                detail=item.idea,
+                recommended=item.recommended,
+            )
+            for item in directions
+        ],
+    )
 
 
 #: Questions the run genuinely cannot proceed past. Everything else is asked

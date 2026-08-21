@@ -278,7 +278,8 @@ def poster(
             },
         )
     )
-    cursor += headline_height + 2.0
+    # Enough air that the headline's descenders never reach the line below.
+    cursor += headline_height + 4.0
     if detail:
         calls.append(
             (
@@ -1053,3 +1054,314 @@ def composite_cover(
         ]
     )
     return Recipe(name=f"composite cover '{design}'", calls=calls)
+
+
+# ------------------------------------------------------------- editorial ---
+
+
+def editorial_poster(
+    *,
+    design: str,
+    format: str,  # noqa: A002 - the tool's own argument name
+    sheet: Sheet,
+    headline: str,
+    kicker: str = "",
+    detail: str = "",
+    photo: str = "",
+    brief: StyleBrief | None = None,
+    language: str = "fa",
+) -> Recipe:
+    """The quiet one: a strict grid, a great deal of white, hairlines.
+
+    Everything sits on the same column edge and nothing is centred. The
+    picture is small and deliberately placed rather than filling the sheet,
+    the type is set at a reading size instead of a shouting one, and the
+    hierarchy is carried by space and by two hairline rules. It is the
+    opposite of the photographic and typographic approaches on purpose - a
+    choice of three that are all loud is not a choice.
+    """
+    colours = Palette.from_brief(brief)
+    rtl = language in ("fa", "ar", "he", "ur")
+    align = "right" if rtl else "left"
+    margin = 12.0
+    # The measure sits on a third of the sheet, which is what makes the white
+    # space read as a decision rather than as a gap.
+    measure = 46.0
+    left = 100 - margin - measure if rtl else margin
+
+    calls: list[Call] = [
+        ("start_design", {"name": design, "format": format, "background": colours.paper}),
+        (
+            "add_shape",
+            {
+                "design": design,
+                "name": "rule_top",
+                "shape": "rectangle",
+                "x": margin,
+                "y": 16,
+                "width": 100 - margin * 2,
+                "height": 0.18,
+                "units": "percent",
+                "color": colours.ink,
+                "role": "rule",
+            },
+        ),
+    ]
+    if kicker:
+        calls.append(
+            (
+                "add_text",
+                {
+                    "design": design,
+                    "name": "kicker",
+                    "text": kicker,
+                    "x": left,
+                    "y": 18,
+                    "width": measure,
+                    "height": 3.2,
+                    "units": "percent",
+                    "color": colours.accent,
+                    "alignment": align,
+                    "tracking": 180,
+                    "role": "kicker",
+                },
+            )
+        )
+    calls.append(
+        (
+            "add_text",
+            {
+                "design": design,
+                "name": "headline",
+                "text": headline,
+                "x": left,
+                "y": 23,
+                "width": measure,
+                "height": 22,
+                "units": "percent",
+                "color": readable_on(colours.paper),
+                "alignment": align,
+                "tracking": -8,
+                "role": "headline",
+            },
+        )
+    )
+    if detail:
+        calls.append(
+            (
+                "add_text",
+                {
+                    "design": design,
+                    "name": "detail",
+                    "text": detail,
+                    "x": left,
+                    "y": 47,
+                    "width": measure,
+                    "height": 9,
+                    "units": "percent",
+                    "color": shift(readable_on(colours.paper), lighten=0.25),
+                    "alignment": align,
+                    "role": "body",
+                },
+            )
+        )
+    if photo:
+        # Small, low, and on the opposite column edge from the type: the
+        # picture answers the text rather than competing with it.
+        picture_left = margin if rtl else 100 - margin - 34
+        calls.append(
+            (
+                "place_photo",
+                {
+                    "design": design,
+                    "name": "picture",
+                    "path": photo,
+                    "x": picture_left,
+                    "y": 58,
+                    "width": 34,
+                    "height": 26,
+                    "units": "percent",
+                    "fit": "cover",
+                    "role": "subject",
+                },
+            )
+        )
+    calls.extend(
+        [
+            (
+                "add_shape",
+                {
+                    "design": design,
+                    "name": "rule_foot",
+                    "shape": "rectangle",
+                    "x": margin,
+                    "y": 90,
+                    "width": 100 - margin * 2,
+                    "height": 0.18,
+                    "units": "percent",
+                    "color": colours.ink,
+                    "role": "rule",
+                },
+            ),
+            ("check_design", {"design": design}),
+            ("render_design", {"design": design}),
+            ("build_in_photoshop", {"design": design, "export_as": "png"}),
+            ("save_design", {"design": design}),
+        ]
+    )
+    return Recipe(name=f"editorial '{design}'", calls=calls)
+
+
+# --------------------------------------------------------------- graphic ---
+
+
+def graphic_poster(
+    *,
+    design: str,
+    format: str,  # noqa: A002 - the tool's own argument name
+    sheet: Sheet,
+    headline: str,
+    kicker: str = "",
+    detail: str = "",
+    photo: str = "",
+    brief: StyleBrief | None = None,
+    language: str = "fa",
+) -> Recipe:
+    """The loud one: shape and colour carry it, and the type sits inside them.
+
+    A field of accent cut by a diagonal, a disc the type overlaps, and a
+    photograph - if there is one - masked into the disc rather than laid
+    across the sheet. Nothing here is a photograph with words on it, which is
+    the point: it is the concept that survives having no picture at all.
+    """
+    colours = Palette.from_brief(brief)
+    rtl = language in ("fa", "ar", "he", "ur")
+    align = "right" if rtl else "left"
+    margin = 9.0
+
+    calls: list[Call] = [
+        ("start_design", {"name": design, "format": format, "background": colours.ground}),
+        (
+            "add_shape",
+            {
+                "design": design,
+                "name": "field",
+                "shape": "polygon",
+                "x": 0,
+                "y": 0,
+                "width": 100,
+                "height": 62,
+                "units": "percent",
+                "color": colours.accent,
+                "points": [[0, 0], [100, 0], [100, 74], [0, 100]],
+                "role": "field",
+                "depth": "background",
+            },
+        ),
+        (
+            "add_shape",
+            {
+                "design": design,
+                "name": "disc",
+                "shape": "ellipse",
+                "x": 56 if rtl else 8,
+                "y": 26,
+                "width": 36,
+                "height": 26,
+                "units": "percent",
+                "color": colours.ground,
+                "role": "field",
+                "depth": "behind",
+            },
+        ),
+    ]
+    if photo:
+        # Into the disc, not across the sheet.
+        calls.append(
+            (
+                "place_photo",
+                {
+                    "design": design,
+                    "name": "picture",
+                    "path": photo,
+                    "x": 56 if rtl else 8,
+                    "y": 26,
+                    "width": 36,
+                    "height": 26,
+                    "units": "percent",
+                    "fit": "cover",
+                    "clip_to_below": True,
+                    "role": "subject",
+                },
+            )
+        )
+    if kicker:
+        calls.append(
+            (
+                "add_text",
+                {
+                    "design": design,
+                    "name": "kicker",
+                    "text": kicker,
+                    "x": margin,
+                    "y": 8,
+                    "width": 100 - margin * 2,
+                    "height": 4,
+                    "units": "percent",
+                    "color": readable_on(colours.accent),
+                    "alignment": align,
+                    "tracking": 200,
+                    "role": "kicker",
+                    "depth": "top",
+                },
+            )
+        )
+    calls.append(
+        (
+            "add_text",
+            {
+                "design": design,
+                "name": "headline",
+                "text": headline,
+                "x": margin,
+                "y": 58,
+                "width": 100 - margin * 2,
+                "height": 24,
+                "units": "percent",
+                "color": colours.ink,
+                "alignment": align,
+                "tracking": -22,
+                "role": "headline",
+                "depth": "top",
+            },
+        )
+    )
+    if detail:
+        calls.append(
+            (
+                "add_text",
+                {
+                    "design": design,
+                    "name": "detail",
+                    "text": detail,
+                    "x": margin,
+                    "y": 84,
+                    "width": 100 - margin * 2,
+                    "height": 6,
+                    "units": "percent",
+                    "color": shift(colours.ink, lighten=-0.12),
+                    "alignment": align,
+                    "role": "body",
+                    "depth": "top",
+                },
+            )
+        )
+    calls.extend(
+        [
+            ("check_design", {"design": design}),
+            ("render_design", {"design": design}),
+            ("build_in_photoshop", {"design": design, "export_as": "png"}),
+            ("save_design", {"design": design}),
+        ]
+    )
+    return Recipe(name=f"graphic '{design}'", calls=calls)
