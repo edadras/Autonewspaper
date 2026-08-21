@@ -221,6 +221,8 @@ class StudioContext:
     dpi: int = 300
     style_template: TemplateSpec | None = None
     """The template a one-off document inherits its type scale and colours from."""
+    systems: dict[str, Any] = field(default_factory=dict)
+    """Design systems harvested from publications, by name."""
     _locks: dict[str, threading.RLock] = field(default_factory=dict, repr=False)
     _lock_guard: threading.RLock = field(default_factory=threading.RLock, repr=False)
     _furniture: Any = field(default=None, repr=False)
@@ -2224,6 +2226,46 @@ def _register_shared(registry: ToolRegistry, context: StudioContext, author: str
     )
     registry.register(
         Tool(
+            name="harvest_publication",
+            description=(
+                "Measure a publication that already exists - a PDF of a newspaper or a "
+                "magazine - and report the design system behind it: its sheet, its "
+                "margins, its column grid, its colours, its type scale and the boxes its "
+                "pages are built from. The boxes come back as furniture that can be "
+                "redrawn at any size, so a page can be laid out in that paper's own idiom "
+                "rather than in one invented for it."
+            ),
+            parameters=[
+                Parameter("path", "string", "The PDF, or a published artefact name"),
+                Parameter("name", "string", "What to call this design system", required=False, default=""),
+                Parameter(
+                    "pages", "integer",
+                    "How many pages to read; more is slower and more certain",
+                    required=False, minimum=1, maximum=24,
+                ),
+            ],
+            capability="studio.read",
+            handler=lambda path, name="", pages=None: _harvest(context, author, path, name, pages),
+            verifier=verify_truthy,
+        )
+    )
+    registry.register(
+        Tool(
+            name="describe_system",
+            description=(
+                "What a harvested design system says: its measurements, what it is "
+                "confident of, and every box it found."
+            ),
+            parameters=[
+                Parameter("system", "string", "Which harvested system", required=False, default=""),
+            ],
+            capability="studio.read",
+            handler=lambda system="": _describe_system(context, system),
+            verifier=verify_truthy,
+        )
+    )
+    registry.register(
+        Tool(
             name="list_artefacts",
             description=(
                 "What the rest of the crew has finished and published - the files this "
@@ -2309,6 +2351,92 @@ def _analyse_reference(
     }
 
 
+def _harvest(
+    context: StudioContext, author: str, path: str, name: str, pages: int | None
+) -> dict[str, Any]:
+    """Measure a publication and keep what it says."""
+    from app.harvest.harvester import PublicationHarvester
+    from app.harvest.reader import HarvestError
+
+    source = _resolve_media(context, path)
+    if source.suffix.lower() != ".pdf":
+        raise ToolValidationError(
+            f"{source.name} is not a PDF; harvesting reads a publication, not a single page",
+            recovery_action="Give the PDF of an issue, or several page images.",
+        )
+    harvester = PublicationHarvester(dpi=110, max_pages=int(pages or 8))
+    try:
+        system = harvester.harvest_pdf(source, name=name or source.stem)
+    except HarvestError as exc:
+        raise ToolValidationError(exc.message, recovery_action=exc.recovery_action) from exc
+
+    key = name or source.stem
+    context.systems[key] = system
+    saved = system.save(context.path_for(f"{_slug(key)}_system", ".json"))
+    context.board.publish(
+        Artefact(
+            name=f"system:{key}",
+            kind="brief",
+            path=str(saved),
+            author=author,
+            detail={"describes": system.describe()},
+        )
+    )
+    context.board.note(author, f"Measured {source.name}: {system.describe()}")
+    return {
+        "system": key,
+        "describes": system.describe(),
+        "page_width_mm": system.page_width_mm,
+        "page_height_mm": system.page_height_mm,
+        "columns": system.columns,
+        "gutter_mm": system.gutter_mm,
+        "column_width_mm": round(system.column_width_mm, 1),
+        "margins_mm": {
+            "top": system.margin_top_mm,
+            "bottom": system.margin_bottom_mm,
+            "inside": system.margin_inside_mm,
+            "outside": system.margin_outside_mm,
+        },
+        "paper": system.paper,
+        "ink": system.ink,
+        "accent": system.accent,
+        "palette": system.palette,
+        "sizes_pt": system.sizes_pt,
+        "roles": system.role_sizes(),
+        "boxes": sorted({piece.kind.value for piece in system.furniture}),
+        "confidence": {key: round(value, 2) for key, value in system.confidence.items()},
+        "notes": system.notes,
+        "path": str(saved),
+    }
+
+
+def _system(context: StudioContext, name: str) -> Any:
+    """One harvested system, or an error naming the ones there are."""
+    if not context.systems:
+        raise ToolValidationError(
+            "No publication has been measured yet",
+            recovery_action="Call harvest_publication with the PDF of an issue first.",
+        )
+    if not name:
+        return next(iter(context.systems.values()))
+    system = context.systems.get(name)
+    if system is None:
+        raise ToolValidationError(
+            f"There is no design system called '{name}'",
+            context={"systems": sorted(context.systems)},
+        )
+    return system
+
+
+def _describe_system(context: StudioContext, name: str) -> dict[str, Any]:
+    system = _system(context, name)
+    payload = system.to_dict()
+    # The per-page readings are for the operator to check against the paper in
+    # their hand; an agent choosing a size does not need forty of them.
+    payload["pages"] = len(payload.get("pages") or [])
+    return payload
+
+
 def _list_artefacts(context: StudioContext, kind: str) -> dict[str, Any]:
     items = context.board.artefacts(kind)
     return {"count": len(items), "artefacts": [item.to_dict() for item in items]}
@@ -2347,7 +2475,12 @@ def build_page_tools(
             ),
             parameters=[
                 Parameter("name", "string", "What to call this document"),
-                Parameter("format", "string", "Preset name or explicit size"),
+                Parameter(
+                    "format", "string",
+                    "Preset name or explicit size. May be left out when 'like' is given, "
+                    "in which case the measured publication's own sheet is used",
+                    required=False, default="",
+                ),
                 Parameter("pages", "integer", "How many pages", required=False, minimum=1, maximum=200),
                 Parameter("columns", "integer", "Columns in the grid", required=False, minimum=1, maximum=24),
                 Parameter("gutter_mm", "number", "Space between columns", required=False, minimum=0, maximum=30),
@@ -2359,6 +2492,13 @@ def build_page_tools(
                 Parameter(
                     "product_type", "string", "What it is", required=False,
                     choices=["newspaper", "magazine", "brochure", "catalog", "flyer", "poster", "digital"],
+                ),
+                Parameter(
+                    "like", "string",
+                    "Lay it out like a publication that was measured with "
+                    "harvest_publication: its sheet, margins, grid, colours and type scale, "
+                    "unless the arguments above override them",
+                    required=False, default="",
                 ),
             ],
             capability="design.write",
@@ -2466,6 +2606,13 @@ def build_page_tools(
                 Parameter("corner_mm", "number", "Corner radius", required=False, minimum=0),
                 Parameter("rule_pt", "number", "Rule weight in points", required=False, minimum=0),
                 Parameter("opacity", "number", "Opacity", required=False, minimum=0, maximum=100),
+                Parameter(
+                    "like", "string",
+                    "Copy this box from a publication measured with harvest_publication: "
+                    "its colour, its corner and its rule weight are that paper's, and only "
+                    "the size is the one asked for here",
+                    required=False, default="",
+                ),
             ],
             capability="design.write",
             handler=lambda **kwargs: _add_page_furniture(context, author, **kwargs),
@@ -2718,7 +2865,30 @@ def _start_document(
     margin_outside_mm: float | None = None,
     facing_pages: bool | None = None,
     product_type: str | None = None,
+    like: str = "",
 ) -> dict[str, Any]:
+    system = _system(context, like) if like else None
+    if system is not None:
+        return _start_document_like(
+            context,
+            author,
+            system,
+            name=name,
+            # A size that was named explicitly wins over the measured sheet:
+            # an operator laying a paper's design onto A3 has a reason.
+            item=context.formats.resolve(format) if format else None,
+            pages=pages,
+            columns=columns,
+            gutter_mm=gutter_mm,
+            margins=(margin_top_mm, margin_bottom_mm, margin_inside_mm, margin_outside_mm),
+            product_type=product_type,
+            facing_pages=facing_pages,
+        )
+    if not format:
+        raise ToolValidationError(
+            "A size is needed to start a document",
+            recovery_action="Give a format such as 'A3', or name a measured publication in 'like'.",
+        )
     item = context.formats.resolve(format)
     if not item.is_physical:
         log.info("'%s' is a screen format; the document is built at its pixel size in mm", item.name)
@@ -2763,6 +2933,117 @@ def _start_document(
             "height": round(live.height, 2),
         },
         "styles": [style.id for style in template.paragraph_styles],
+    }
+
+
+def _start_document_like(
+    context: StudioContext,
+    author: str,
+    system: Any,
+    *,
+    name: str,
+    item: Any = None,
+    pages: int | None,
+    columns: int | None,
+    gutter_mm: float | None,
+    margins: tuple[float | None, float | None, float | None, float | None] = (None,) * 4,
+    product_type: str | None,
+    facing_pages: bool | None,
+) -> dict[str, Any]:
+    """Begin a document on a publication's own measurements.
+
+    Everything the harvest measured is used as it was measured; anything the
+    caller gave explicitly wins, because an operator asking for eight columns
+    on a paper that runs six has a reason.
+    """
+    template = system.to_template(
+        language=context.language,
+        base=context.style_template,
+        name=f"{name} (like {system.name or system.source})",
+    )
+    if item is not None:
+        # The paper's design, on a different sheet: the margins scale with it
+        # so the proportions the publication was set to survive the change.
+        scale = min(
+            item.width_mm / max(1e-6, template.page_width_mm),
+            item.height_mm / max(1e-6, template.page_height_mm),
+        )
+        template.page_width_mm = round(item.width_mm, 2)
+        template.page_height_mm = round(item.height_mm, 2)
+        template.bleed_mm = item.bleed_mm if item.is_physical else 0.0
+        template.margins = MarginSpec(
+            top=round(template.margins.top * scale, 1),
+            bottom=round(template.margins.bottom * scale, 1),
+            inside=round(template.margins.inside * scale, 1),
+            outside=round(template.margins.outside * scale, 1),
+        )
+        template.grid = GridSpec(
+            columns=template.grid.columns,
+            gutter_mm=round(template.grid.gutter_mm * scale, 2),
+            baseline_mm=template.grid.baseline_mm,
+            rows=template.grid.rows,
+        )
+    top, bottom, inside, outside = margins
+    if any(value is not None for value in margins):
+        template.margins = MarginSpec(
+            top=template.margins.top if top is None else float(top),
+            bottom=template.margins.bottom if bottom is None else float(bottom),
+            inside=template.margins.inside if inside is None else float(inside),
+            outside=template.margins.outside if outside is None else float(outside),
+        )
+    if columns:
+        template.grid = GridSpec(
+            columns=int(columns),
+            gutter_mm=template.grid.gutter_mm,
+            baseline_mm=template.grid.baseline_mm,
+            rows=template.grid.rows,
+        )
+    if gutter_mm is not None:
+        template.grid = GridSpec(
+            columns=template.grid.columns,
+            gutter_mm=float(gutter_mm),
+            baseline_mm=template.grid.baseline_mm,
+            rows=template.grid.rows,
+        )
+    if product_type:
+        template.product_type = product_type  # type: ignore[assignment]
+    if facing_pages is not None:
+        template.facing_pages = bool(facing_pages)
+    _validate_margins(template)
+
+    count = max(1, int(pages or 1))
+    plan = LayoutPlan(project_id=0, template_id=template.id, language=context.language)
+    for index in range(1, count + 1):
+        plan.pages.append(_blank_page(template, index))
+    document = Document(name=name, plan=plan, template=template, engine=LayoutEngine(template))
+    _documents(context)[name] = document
+    context.board.note(
+        author,
+        f"Started '{name}' on {system.name or system.source}'s own measurements: {system.describe()}",
+    )
+    live = plan.pages[0].content_rect
+    return {
+        "document": name,
+        "like": system.name or system.source,
+        "page_width_mm": template.page_width_mm,
+        "page_height_mm": template.page_height_mm,
+        "pages": count,
+        "columns": template.grid.columns,
+        "gutter_mm": template.grid.gutter_mm,
+        "column_width_mm": round(plan.pages[0].column_width(), 2),
+        "live_area_mm": {
+            "x": round(live.x, 2),
+            "y": round(live.y, 2),
+            "width": round(live.width, 2),
+            "height": round(live.height, 2),
+        },
+        "styles": [style.id for style in template.paragraph_styles],
+        "type_sizes_pt": system.sizes_pt,
+        "paper": system.paper,
+        "ink": system.ink,
+        "accent": system.accent,
+        "boxes": sorted({piece.kind.value for piece in system.furniture}),
+        "confidence": {key: round(value, 2) for key, value in system.confidence.items()},
     }
 
 
@@ -2995,9 +3276,27 @@ def _add_page_furniture(
     corner_mm: float | None = None,
     rule_pt: float | None = None,
     opacity: float | None = None,
+    like: str = "",
 ) -> dict[str, Any]:
     doc = _document(context, document)
     sheet = doc.page(page)
+    if like:
+        from app.harvest.publication import scaled_furniture
+
+        try:
+            spec = scaled_furniture(
+                _system(context, like),
+                kind,
+                width_mm=float(width_mm),
+                height_mm=float(height_mm),
+                dpi=context.dpi,
+            )
+        except ValueError as exc:
+            raise ToolValidationError(str(exc)) from exc
+        return _place_furniture(
+            context, author, sheet, name, spec, document, page,
+            x_mm=float(x_mm), y_mm=float(y_mm), copied=like,
+        )
     spec = FurnitureSpec(
         kind=Furniture(kind),
         width_mm=float(width_mm),
@@ -3011,18 +3310,40 @@ def _add_page_furniture(
         opacity=100.0 if opacity is None else float(opacity),
         direction="rtl" if context.language in ("fa", "ar") else "ltr",
     )
+    return _place_furniture(
+        context, author, sheet, name, spec, document, page,
+        x_mm=float(x_mm), y_mm=float(y_mm),
+    )
+
+
+def _place_furniture(
+    context: StudioContext,
+    author: str,
+    sheet: PageLayout,
+    name: str,
+    spec: FurnitureSpec,
+    document: str,
+    page: int,
+    *,
+    x_mm: float,
+    y_mm: float,
+    copied: str = "",
+) -> dict[str, Any]:
+    """Draw a piece of furniture and put it on the page, behind the copy."""
     factory = _furniture_factory(context)
     with context.host_lock("photoshop"):
         target = factory.make(spec)
     placed = factory.placement(
-        spec, Box(x=x_mm, y=y_mm, width=width_mm, height=height_mm), context.dpi
+        spec,
+        Box(x=x_mm, y=y_mm, width=spec.width_mm, height=spec.height_mm),
+        context.dpi,
     )
     rect = Rect(x=placed.x, y=placed.y, width=placed.width, height=placed.height)
     if not sheet.page_rect.contains(rect, tolerance=2.0):
         # The piece is drawn a couple of millimetres over its frame so an edge
         # effect is not clipped; at the very edge of the sheet that overhang is
         # the bleed, which is exactly where it belongs.
-        log.info("The %s on page %d bleeds off the trim", kind, page)
+        log.info("The %s on page %d bleeds off the trim", spec.kind.value, page)
     element = ElementSpec(
         id=name,
         type=ElementType.IMAGE,
@@ -3032,7 +3353,11 @@ def _add_page_furniture(
         fit_mode="fill",
         style_id="image",
         locked=False,
-        meta={"role": f"furniture:{kind}", "designed_in": "photoshop"},
+        meta={
+            "role": f"furniture:{spec.kind.value}",
+            "designed_in": "photoshop",
+            **({"copied_from": copied} if copied else {}),
+        },
     )
     sheet.elements = [item for item in sheet.elements if item.id != name]
     sheet.elements.append(element)
@@ -3042,14 +3367,15 @@ def _add_page_furniture(
             kind="file",
             path=str(target),
             author=author,
-            detail={"furniture": kind, "page": page},
+            detail={"furniture": spec.kind.value, "page": page, "copied_from": copied},
         )
     )
     return {
         "document": document,
         "page": page,
         "frame": name,
-        "furniture": kind,
+        "furniture": spec.kind.value,
+        **({"copied_from": copied, "color": spec.color} if copied else {}),
         "path": str(target),
         "x_mm": round(rect.x, 2),
         "y_mm": round(rect.y, 2),

@@ -45,6 +45,9 @@ class StudioService:
         self.ai = ai
         self.bus = bus
         self.formats = FormatRegistry()
+        #: Publications this session has measured, by name. A studio run
+        #: started afterwards lays pages out in their idiom.
+        self.systems: dict[str, Any] = {}
 
     # ------------------------------------------------------------ running
     def run(
@@ -74,6 +77,7 @@ class StudioService:
             language=language,
             dpi=self.settings.settings.export.builtin_pdf_dpi,
             style_template=self._style_template(language),
+            systems=dict(self.systems),
         )
 
     # ---------------------------------------------------------- internals
@@ -107,6 +111,52 @@ class StudioService:
         if isinstance(provider, DisabledVideoProvider):
             return None
         return provider
+
+    # ----------------------------------------------------------- harvest
+    def harvest(
+        self,
+        source: Path | str,
+        *,
+        name: str = "",
+        pages: int = 8,
+        token: CancelToken | None = None,
+    ) -> Any:
+        """Measure a publication that already exists.
+
+        The system is kept on the service, so a studio run started afterwards
+        can lay pages out in that publication's own idiom.
+        """
+        from app.harvest.harvester import PublicationHarvester
+
+        path = Path(source)
+        harvester = PublicationHarvester(dpi=110, max_pages=max(1, int(pages)))
+        if path.suffix.lower() == ".pdf":
+            system = harvester.harvest_pdf(path, name=name or path.stem, token=token)
+        else:
+            raise ValueError(
+                f"{path.name} is not a PDF. Harvesting reads a whole publication; "
+                "use harvest_images for a folder of page scans."
+            )
+        self.systems[name or path.stem] = system
+        system.save(self.settings.output_dir() / "studio" / f"{path.stem}_system.json")
+        return system
+
+    def harvest_images(
+        self,
+        sources: list[Path | str],
+        *,
+        width_mm: float,
+        name: str = "",
+        token: CancelToken | None = None,
+    ) -> Any:
+        """Measure a publication that arrived as page scans."""
+        from app.harvest.harvester import PublicationHarvester
+
+        system = PublicationHarvester(dpi=110).harvest_images(
+            sources, width_mm=width_mm, name=name, token=token
+        )
+        self.systems[name or "scans"] = system
+        return system
 
     def formats_for(self, medium: str = "") -> list[dict[str, Any]]:
         """The sizes to offer in the interface."""

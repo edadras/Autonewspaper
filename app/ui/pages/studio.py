@@ -151,6 +151,30 @@ class StudioPage(Page):
         files_card.add(footage_bar)
         layout.addWidget(files_card)
 
+        harvest_card = Card("Work like an existing publication")
+        note = QLabel(
+            "Point at a PDF of a newspaper or magazine and the studio measures it - its "
+            "sheet, margins, column grid, colours, type scale and the boxes its pages are "
+            "built from - then lays your pages out in that publication's own idiom, with "
+            "its boxes redrawn rather than reinvented."
+        )
+        note.setObjectName("Subtitle")
+        note.setWordWrap(True)
+        harvest_card.add(note)
+        harvest_bar = Toolbar()
+        self.harvest_button = harvest_bar.add(QPushButton("Measure a publication…"))
+        self.harvest_button.clicked.connect(self._harvest)
+        self.forget_button = harvest_bar.add(QPushButton("Forget it"))
+        self.forget_button.setEnabled(False)
+        self.forget_button.clicked.connect(self._forget)
+        harvest_bar.stretch()
+        harvest_card.add(harvest_bar)
+        self.harvest_label = QLabel("Nothing has been measured.")
+        self.harvest_label.setObjectName("Subtitle")
+        self.harvest_label.setWordWrap(True)
+        harvest_card.add(self.harvest_label)
+        layout.addWidget(harvest_card)
+
         toolbar = Toolbar()
         self.run_button = toolbar.add(QPushButton("Make it"))
         self.run_button.setObjectName("Primary")
@@ -201,6 +225,50 @@ class StudioPage(Page):
         return side
 
     # ------------------------------------------------------------ actions
+    def _harvest(self) -> None:
+        """Measure a publication the operator points at."""
+        chosen, _ = QFileDialog.getOpenFileName(
+            self, "Choose a publication", "", "Publications (*.pdf)"
+        )
+        if not chosen:
+            return
+        service = self.app.studio
+        name = Path(chosen).stem
+        self.run_background(
+            "harvest",
+            f"Measuring {Path(chosen).name}",
+            lambda: service.harvest(chosen, name=name, pages=8),
+            on_success=self._show_system,
+            busy_widgets=[self.harvest_button, self.run_button],
+            status=self.status,
+        )
+
+    def _show_system(self, system: object) -> None:
+        """Say what was read, and how sure of it the measurement is."""
+        describes = getattr(system, "describe", lambda: "")()
+        confidence = getattr(system, "confidence", {}) or {}
+        weakest = sorted(confidence.items(), key=lambda item: item[1])[:2]
+        lines = [f"<b>{getattr(system, 'name', '') or 'Publication'}</b>", describes]
+        if weakest:
+            lines.append(
+                "Least certain of: "
+                + ", ".join(f"{name} ({value * 100:.0f}%)" for name, value in weakest)
+            )
+        for note in getattr(system, "notes", [])[:3]:
+            lines.append(f"· {note}")
+        self.harvest_label.setText("<br>".join(lines))
+        self.forget_button.setEnabled(True)
+        self.status.setText(
+            "Measured. New pages will be laid out in this publication's idiom, with its "
+            "own boxes."
+        )
+
+    def _forget(self) -> None:
+        """Stop working in the measured publication's idiom."""
+        self.app.studio.systems.clear()
+        self.harvest_label.setText("Nothing has been measured.")
+        self.forget_button.setEnabled(False)
+
     def _add_references(self) -> None:
         self._add_files(self.reference_list, "Choose references", REFERENCE_FILTER)
 
